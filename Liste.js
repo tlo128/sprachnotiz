@@ -1,4 +1,4 @@
-// Lesezugriffe für die PWA: Liste mit Filtern, Stammdaten (Personen/Projekte).
+// Lesezugriffe für die PWA: Liste mit Filtern.
 
 function listeAbrufen_(filter, wert) {
   var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
@@ -62,20 +62,4 @@ function zeileZuObjekt_(zeile) {
       : wert;
   });
   return obj;
-}
-
-function stammdatenAbrufen_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  return {
-    personen: namenAlsListe_(ss.getSheetByName(SHEET_PERSONEN)),
-    projekte: namenAlsListe_(ss.getSheetByName(SHEET_PROJEKTE))
-  };
-}
-
-function namenAlsListe_(sheet) {
-  var letzteZeile = sheet.getLastRow();
-  if (letzteZeile < 2) return [];
-  return sheet.getRange(2, 1, letzteZeile - 1, 1).getValues()
-    .map(function (z) { return z[0]; })
-    .filter(String);
 }

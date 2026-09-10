@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sprachnotiz-v1';
+const CACHE_NAME = 'sprachnotiz-v2';
 const APP_SHELL = ['./', './index.html', './app.js', './styles.css', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', (ereignis) => {
@@ -22,11 +22,13 @@ self.addEventListener('fetch', (ereignis) => {
     caches.match(ereignis.request).then((zwischengespeichert) => {
       const netzwerk = fetch(ereignis.request)
         .then((antwort) => {
-          const kopie = antwort.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(ereignis.request, kopie));
+          if (antwort.ok) {
+            const kopie = antwort.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(ereignis.request, kopie));
+          }
           return antwort;
         })
-        .catch(() => zwischengespeichert);
+        .catch(() => zwischengespeichert || Response.error());
       return zwischengespeichert || netzwerk;
     })
   );

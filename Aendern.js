@@ -14,7 +14,10 @@ function eintragAendern_(id, felder) {
       if (AENDERBARE_FELDER.indexOf(feldName) === -1) return;
       var spaltenIndex = SPALTEN_NOTIZEN.indexOf(feldName) + 1;
       var wert = felder[feldName];
-      if ((feldName === 'Datum' || feldName === 'Erinnerungsdatum') && wert) {
+      if (feldName === 'Status' && STATUS_WERTE.indexOf(wert) === -1) return;
+      if (feldName === 'Typ' && TYP_WERTE.indexOf(wert) === -1) return;
+      if (feldName === 'Prüfen') wert = wert === true;
+      if (feldName === 'Datum' || feldName === 'Erinnerungsdatum') {
         wert = datumAusText_(wert);
       }
       notizen.getRange(zeileNr, spaltenIndex).setValue(wert);

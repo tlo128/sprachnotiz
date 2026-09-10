@@ -112,7 +112,7 @@ function schreibeEintragZeile_(notizen, personen, projekte, eintrag, originaltex
 
 function schreibeRohtextZeile_(notizen, originaltext, jetzt) {
   var zeile = {
-    ID: naechsteId_(notizen),
+    ID: 0,
     Titel: originaltext.substring(0, 60),
     Datum: '',
     Status: 'prüfen',

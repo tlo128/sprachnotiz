@@ -66,49 +66,49 @@ async function warteschlangeEntfernen(id) {
 
 /* ===================== API-Client ===================== */
 
-function apiFehler(antwort) {
-  return new Error(antwort && antwort.fehler ? antwort.fehler : 'Unbekannter Fehler.');
+// Netzfehler: kein Netz oder Server nicht erreichbar -> Notiz wird gepuffert.
+// Alle anderen Fehler (falsche URL, falscher Schlüssel, Serverfehler) werden angezeigt.
+class NetzFehler extends Error {}
+
+async function apiAufruf(daten) {
+  const { url, schluessel } = konfigLaden();
+  if (!url || !schluessel) throw new Error('Web-App-URL und Schlüssel fehlen. Bitte Einstellungen öffnen.');
+
+  let http;
+  try {
+    http = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({}, daten, { schluessel }))
+    });
+  } catch (fehler) {
+    throw new NetzFehler('Keine Verbindung.');
+  }
+
+  let antwort;
+  try {
+    antwort = await http.json();
+  } catch (fehler) {
+    throw new Error('Unerwartete Antwort vom Server. Web-App-URL in den Einstellungen prüfen.');
+  }
+  if (!antwort.ok) throw new Error(antwort.fehler || 'Unbekannter Fehler.');
+  return antwort;
 }
 
 async function apiErfassen(text, zeitstempel) {
-  const { url, schluessel } = konfigLaden();
-  const antwort = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ aktion: 'erfassen', schluessel, text, zeitstempel })
-  }).then((r) => r.json());
-  if (!antwort.ok) throw apiFehler(antwort);
-  return antwort.eintraege;
+  return (await apiAufruf({ aktion: 'erfassen', text, zeitstempel })).eintraege;
 }
 
 async function apiListe(filter, wert) {
-  const { url, schluessel } = konfigLaden();
-  const parameter = new URLSearchParams({ schluessel, filter: filter || '' });
-  if (wert) parameter.set('wert', wert);
-  const antwort = await fetch(url + '?' + parameter.toString()).then((r) => r.json());
-  if (!antwort.ok) throw apiFehler(antwort);
-  return antwort.eintraege;
+  return (await apiAufruf({ aktion: 'liste', filter: filter || '', wert: wert || '' })).eintraege;
 }
 
 async function apiAendern(id, felder) {
-  const { url, schluessel } = konfigLaden();
-  const antwort = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ aktion: 'aendern', schluessel, id, felder })
-  }).then((r) => r.json());
-  if (!antwort.ok) throw apiFehler(antwort);
-  return antwort.eintrag;
+  return (await apiAufruf({ aktion: 'aendern', id, felder })).eintrag;
 }
 
 async function apiRueckgaengig(ids) {
-  const { url, schluessel } = konfigLaden();
-  const antwort = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ aktion: 'rueckgaengig', schluessel, ids })
-  }).then((r) => r.json());
-  if (!antwort.ok) throw apiFehler(antwort);
+  await apiAufruf({ aktion: 'rueckgaengig', ids });
 }
 
 /* ===================== Warteschlange <-> Server abgleichen ===================== */
@@ -239,6 +239,12 @@ async function fertig() {
       toastZeigen('Gespeichert', ids);
       return;
     } catch (fehler) {
+      if (!(fehler instanceof NetzFehler)) {
+        // Konfigurations- oder Serverfehler: Text behalten, damit nichts verloren geht.
+        feld.value = text;
+        toastZeigen('Nicht gespeichert: ' + fehler.message, null);
+        return;
+      }
       // Server nicht erreichbar trotz "online" -> puffern
     }
   }
@@ -298,7 +304,10 @@ async function listeLaden(containerId, filter, wert) {
     const eintraege = await apiListe(filter, wert);
     eintraegeRendern(eintraege, container);
   } catch (fehler) {
-    container.innerHTML = '<p class="fehler-hinweis">Keine Verbindung zum Sheet. ' + fehler.message + '</p>';
+    const hinweis = document.createElement('p');
+    hinweis.className = 'fehler-hinweis';
+    hinweis.textContent = 'Keine Verbindung zum Sheet. ' + fehler.message;
+    container.replaceChildren(hinweis);
   }
 }
 
@@ -438,7 +447,8 @@ document.getElementById('bearbeiten-formular').addEventListener('submit', async 
     Erinnerungsdatum: document.getElementById('b-erinnerung').value,
     Person: document.getElementById('b-person').value.trim(),
     Projekt: document.getElementById('b-projekt').value.trim(),
-    Kurzfassung: document.getElementById('b-kurzfassung').value.trim()
+    Kurzfassung: document.getElementById('b-kurzfassung').value.trim(),
+    'Prüfen': false // wurde gerade vom Nutzer durchgesehen
   };
   try {
     await apiAendern(bearbeitenAktuelleId, felder);
