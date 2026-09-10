@@ -56,3 +56,29 @@ function testAliase() {
 
   Logger.log('Fertig. Bitte im Blatt "Personen" prüfen: Zeile "Herr Eckert" sollte Schreibvarianten "Alex, Inwatec" haben.');
 }
+
+// Legt direkt (ohne Claude-Aufruf) einen Testeintrag mit Erinnerung "heute" an,
+// um erinnerungsMailSenden() sofort testen zu können. Im Editor ausführen.
+function testErinnerungErstellen() {
+  var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
+  var jetzt = new Date();
+  var heuteDatum = new Date();
+  heuteDatum.setHours(0, 0, 0, 0);
+  var zeile = {
+    ID: naechsteId_(notizen),
+    Titel: 'TEST: Erinnerungs-Mail',
+    Datum: '',
+    Status: 'offen',
+    Erinnerungsdatum: heuteDatum,
+    Person: '',
+    Projekt: '',
+    Typ: 'Aufgabe',
+    Kurzfassung: 'Testeintrag für die Erinnerungs-Mail, kann danach gelöscht werden.',
+    Originaltext: '(Testeintrag, kein echter Sprachtext)',
+    Confidence: 1,
+    'Prüfen': false,
+    Erstellt: jetzt
+  };
+  notizen.appendRow(SPALTEN_NOTIZEN.map(function (spalte) { return zeile[spalte]; }));
+  Logger.log('Testeintrag ID %s angelegt. Jetzt erinnerungsMailSenden() ausführen.', zeile.ID);
+}
