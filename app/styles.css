@@ -294,3 +294,4 @@ nav#tabs button.aktiv { color: var(--akzent); font-weight: 600; }
 #einrichtung[hidden] { display: none; }
 #einrichtung h2 { margin-top: 0; }
 #einrichtung p { color: var(--text-schwach); font-size: 0.9rem; }
+#einrichtung .version { margin-top: 24px; font-size: 0.8rem; text-align: center; opacity: 0.7; }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sprachnotiz-v3';
+const CACHE_NAME = 'sprachnotiz-v4'; // Nummer = APP_VERSION in app.js
 const APP_SHELL = ['./', './index.html', './app.js', './styles.css', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', (ereignis) => {

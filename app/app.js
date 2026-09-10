@@ -1,5 +1,10 @@
 'use strict';
 
+// Bei jeder Änderung an der PWA erhöhen. Der Cache-Name in sw.js zieht mit (gleiche Nummer),
+// damit das Handy die neue Version beim zweiten Start sicher übernimmt.
+const APP_VERSION = '1.4';
+const APP_STAND = '10.09.2026';
+
 /* ===================== Konfiguration ===================== */
 
 const SPEICHER_URL = 'notiz_webapp_url';
@@ -581,6 +586,7 @@ function einrichtungPruefen() {
 }
 
 function einrichtungOeffnen() {
+  document.getElementById('app-version').textContent = 'Version ' + APP_VERSION + ' vom ' + APP_STAND;
   const { url, schluessel } = konfigLaden();
   document.getElementById('eingabe-url').value = url;
   document.getElementById('eingabe-schluessel').value = schluessel;
