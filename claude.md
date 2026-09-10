@@ -93,6 +93,20 @@ Prompt-Muster für jede Session: "Lies CLAUDE.md. Aufgabe dieser Session: [Ziel]
 - Falls das Offline-Tastatur-Diktat zu ungenau ist: Audio-Aufnahme in der PWA (funktioniert offline) plus "Teilen" aus der Samsung-Sprachmemo-App in die PWA. Transkription über die Gemini API (kostenloses Kontingent, zweiter Schlüssel), danach wie gewohnt Claude. Nur bauen, wenn der Bedarf sich zeigt.
 - Falls gewünscht: tägliche Excel-Kopie nach OneDrive.
 
+## Aktueller Stand (10.09.2026)
+
+Sessions 1 bis 3 sind umgesetzt und im Betrieb. Danach Sicherheits- und Komfortdurchsicht:
+
+- API nur per POST mit JSON-Body, der Schlüssel steht nie in einer URL. doGet lehnt ab. Aktionen: erfassen, liste, aendern, rueckgaengig (Code.js).
+- Web-App-Deployment: eine feste Deployment-ID, neue Backend-Stände mit `clasp push` und anschließend `clasp deploy -i <Deployment-ID> -d "..."` als neue Version auf dasselbe Deployment. Die URL bleibt gleich. `clasp deployments` zeigt die ID.
+- PWA hat eine Versionsnummer: `APP_VERSION` oben in app/app.js, sichtbar im Einstellungs-Bildschirm. Bei jeder PWA-Änderung erhöhen und `CACHE_NAME` in app/sw.js auf dieselbe Nummer setzen. Das Handy übernimmt eine neue Version beim zweiten Start.
+- Listen werden am Handy zwischengespeichert (localStorage) und sofort angezeigt, der Abgleich mit Google läuft im Hintergrund. Grund: Apps Script braucht pro Aufruf 1 bis 4 Sekunden, gelegentlich länger.
+- Fehlerfälle in der PWA: Netzfehler puffern die Notiz, Konfigurations- und Serverfehler zeigen eine Meldung und lassen den Text stehen.
+- Content-Security-Policy in index.html: Verbindungen nur zu script.google.com und script.googleusercontent.com.
+- Textlimit 5000 Zeichen, Status und Typ werden serverseitig validiert, Prüfen-Markierung wird beim Speichern aus dem Bearbeiten-Formular gelöscht.
+- .clasp.json liegt nur lokal (in .gitignore), das Repository ist öffentlich, weil GitHub Pages im kostenlosen Konto das voraussetzt. Es enthält keine Schlüssel, keine URLs, keine Daten.
+- Bekannt und akzeptiert: Bei jeder Notiz geht die komplette Personen- und Projektliste als Kontext an die Claude API.
+
 ## Regeln für Claude Code
 
 - Keine zusätzlichen Dienste, Bibliotheken oder Konten ohne Rückfrage.
