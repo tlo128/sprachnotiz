@@ -51,3 +51,4 @@ function doGet(e) {
   return ContentService.createTextOutput(JSON.stringify(antwort))
     .setMimeType(ContentService.MimeType.JSON);
 }
+

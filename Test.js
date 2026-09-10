@@ -35,3 +35,24 @@ function testMitBeispielsaetzen() {
 
   Logger.log('Fertig. Bitte im Sheet "Notizen" prüfen, dazu "Personen" und "Projekte".');
 }
+
+// Testet, ob ausdrücklich genannte Aliase (Spitzname, Firma) in die
+// Schreibvarianten übernommen werden und spätere Notizen darüber wieder
+// gefunden werden. Im Editor ausführen: testAliase()
+function testAliase() {
+  var jetzt = '2026-09-09T10:00:00+02:00';
+
+  var satz1 = 'Herr Eckert, den nennen manche auch Alex, ist von der Firma Inwatec und möchte die Musterwohnung im Lindenpark besichtigen.';
+  Logger.log('--- Satz 1: ' + satz1);
+  verarbeite(satz1, jetzt).forEach(function (e) {
+    Logger.log('  -> Person=%s | Projekt=%s', e.Person, e.Projekt);
+  });
+
+  var satz2 = 'Alex hat abgesagt, neuer Termin nächsten Dienstag.';
+  Logger.log('--- Satz 2 (nur Alias "Alex"): ' + satz2);
+  verarbeite(satz2, jetzt).forEach(function (e) {
+    Logger.log('  -> Person=%s (sollte "Herr Eckert" sein, falls Alias erkannt wurde)', e.Person);
+  });
+
+  Logger.log('Fertig. Bitte im Blatt "Personen" prüfen: Zeile "Herr Eckert" sollte Schreibvarianten "Alex, Inwatec" haben.');
+}

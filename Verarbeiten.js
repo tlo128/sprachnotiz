@@ -47,7 +47,8 @@ function verarbeite(text, zeitstempel) {
   }
 
   var unsicher = ergebnis.eintraege.length > 1 || ergebnis.eintraege.some(function (e) {
-    return e.confidence < CONFIDENCE_SCHWELLE || e.neue_person || e.neues_projekt;
+    return e.confidence < CONFIDENCE_SCHWELLE || e.neue_person || e.neues_projekt ||
+      (e.person_aliase && e.person_aliase.length) || (e.projekt_aliase && e.projekt_aliase.length);
   });
 
   if (unsicher) {
@@ -85,6 +86,9 @@ function naechsteId_(sheet) {
 function schreibeEintragZeile_(notizen, personen, projekte, eintrag, originaltext, jetzt, muessenPruefen) {
   var person = eintrag.person ? nameAbgleichen_(personen, eintrag.person, jetzt) : null;
   var projekt = eintrag.projekt ? nameAbgleichen_(projekte, eintrag.projekt, jetzt) : null;
+
+  if (person && eintrag.person_aliase) aliaseHinzufuegen_(personen, person.kanonisch, eintrag.person_aliase, jetzt);
+  if (projekt && eintrag.projekt_aliase) aliaseHinzufuegen_(projekte, projekt.kanonisch, eintrag.projekt_aliase, jetzt);
 
   var zeile = {
     ID: naechsteId_(notizen),

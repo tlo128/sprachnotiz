@@ -38,3 +38,36 @@ function nameAbgleichen_(sheet, name, jetzt) {
   sheet.appendRow([name, '', jetzt]);
   return { kanonisch: name, istNeu: true };
 }
+
+/**
+ * Fügt weitere Schreibvarianten/Aliase zu einem bereits bekannten kanonischen
+ * Namen hinzu (z.B. "Herr Eckert, auch Alex genannt, von Firma Inwatec").
+ * Bestehende Varianten bleiben erhalten, Duplikate werden ausgelassen.
+ */
+function aliaseHinzufuegen_(sheet, kanonischerName, aliase, jetzt) {
+  if (!aliase || !aliase.length) return;
+  var letzteZeile = sheet.getLastRow();
+  if (letzteZeile < 2) return;
+  var gesucht = kanonischerName.trim().toLowerCase();
+  var werte = sheet.getRange(2, 1, letzteZeile - 1, 2).getValues();
+
+  for (var i = 0; i < werte.length; i++) {
+    if (String(werte[i][0]).trim().toLowerCase() !== gesucht) continue;
+
+    var vorhandene = (werte[i][1] || '').split(',').map(function (v) { return v.trim(); }).filter(String);
+    var vorhandeneKlein = vorhandene.map(function (v) { return v.toLowerCase(); });
+
+    aliase.forEach(function (alias) {
+      alias = (alias || '').trim();
+      if (!alias || alias.toLowerCase() === gesucht) return;
+      if (vorhandeneKlein.indexOf(alias.toLowerCase()) === -1) {
+        vorhandene.push(alias);
+        vorhandeneKlein.push(alias.toLowerCase());
+      }
+    });
+
+    sheet.getRange(i + 2, 2).setValue(vorhandene.join(', '));
+    sheet.getRange(i + 2, 3).setValue(jetzt);
+    return;
+  }
+}

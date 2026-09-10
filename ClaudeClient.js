@@ -26,9 +26,17 @@ function strukturTool_() {
               kurzfassung: { type: 'string', description: 'Ein bis zwei Sätze Zusammenfassung.' },
               neue_person: { type: 'boolean', description: 'true, falls "person" nicht in der übergebenen Liste bekannter Personen/Schreibvarianten vorkommt.' },
               neues_projekt: { type: 'boolean', description: 'true, falls "projekt" nicht in der übergebenen Liste bekannter Projekte/Schreibvarianten vorkommt.' },
+              person_aliase: {
+                type: 'array', items: { type: 'string' },
+                description: 'Nur füllen, wenn der Text ausdrücklich eine weitere Schreibweise/Spitzname/Firma für "person" nennt (z.B. "Herr Eckert, auch Alex genannt, von der Firma Inwatec" -> ["Alex", "Inwatec"]). Sonst leeres Array.'
+              },
+              projekt_aliase: {
+                type: 'array', items: { type: 'string' },
+                description: 'Nur füllen, wenn der Text ausdrücklich eine weitere Schreibweise/Kurzname für "projekt" nennt. Sonst leeres Array.'
+              },
               confidence: { type: 'number', description: 'Zahl zwischen 0 und 1: wie sicher ist die Zuordnung von Feldern, Namen und Datum.' }
             },
-            required: ['titel', 'datum', 'status', 'erinnerungsdatum', 'person', 'projekt', 'typ', 'kurzfassung', 'neue_person', 'neues_projekt', 'confidence']
+            required: ['titel', 'datum', 'status', 'erinnerungsdatum', 'person', 'projekt', 'typ', 'kurzfassung', 'neue_person', 'neues_projekt', 'person_aliase', 'projekt_aliase', 'confidence']
           }
         }
       },
@@ -41,6 +49,7 @@ function systemPrompt_(jetztText, personenListe, projekteListe) {
   return [
     'Du strukturierst deutsche Sprachnotizen aus dem Immobilienalltag (Bauträger, Vermietung, Vertrieb) in Einträge für eine Notiz-Datenbank.',
     'Jetzt ist: ' + jetztText + '. Löse relative Datumsangaben ("nächsten Dienstag", "Ende des Monats", "morgen") relativ zu diesem Zeitpunkt auf.',
+    'Wenn der Text ausdrücklich zwei Namen/Bezeichnungen derselben Person oder demselben Projekt zuordnet (z.B. "Herr Eckert, auch Alex genannt", "das ist dieselbe wie...", "von der Firma X"), trage die zusätzliche(n) Bezeichnung(en) in person_aliase bzw. projekt_aliase ein, statt sie als eigene Person/eigenes Projekt zu behandeln.',
     'Bekannte Personen (Name: Schreibvarianten): ' + (personenListe || '(keine)'),
     'Bekannte Projekte (Name: Schreibvarianten): ' + (projekteListe || '(keine)'),
     'Antworte ausschließlich über das Werkzeug ' + STRUKTUR_TOOL_NAME + '.'
