@@ -461,9 +461,24 @@ window.addEventListener('offline', verbindungsAnzeigeAktualisieren);
 
 function einrichtungPruefen() {
   const { url, schluessel } = konfigLaden();
-  const overlay = document.getElementById('einrichtung');
-  overlay.hidden = !!(url && schluessel);
+  const konfiguriert = !!(url && schluessel);
+  document.getElementById('einrichtung').hidden = konfiguriert;
+  document.getElementById('einrichtung-abbrechen').hidden = !konfiguriert;
 }
+
+function einrichtungOeffnen() {
+  const { url, schluessel } = konfigLaden();
+  document.getElementById('eingabe-url').value = url;
+  document.getElementById('eingabe-schluessel').value = schluessel;
+  document.getElementById('einrichtung-abbrechen').hidden = !(url && schluessel);
+  document.getElementById('einrichtung').hidden = false;
+}
+
+document.getElementById('einstellungen-btn').addEventListener('click', einrichtungOeffnen);
+
+document.getElementById('einrichtung-abbrechen').addEventListener('click', () => {
+  document.getElementById('einrichtung').hidden = true;
+});
 
 document.getElementById('einrichtung-formular').addEventListener('submit', (ev) => {
   ev.preventDefault();
@@ -472,6 +487,7 @@ document.getElementById('einrichtung-formular').addEventListener('submit', (ev) 
   if (!url || !schluessel) return;
   konfigSpeichern(url, schluessel);
   document.getElementById('einrichtung').hidden = true;
+  document.getElementById('einrichtung-abbrechen').hidden = false;
   warteschlangeSynchronisieren();
 });
 

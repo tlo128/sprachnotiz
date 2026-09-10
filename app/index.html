@@ -26,7 +26,10 @@
       <label for="eingabe-schluessel">Geheimer Schlüssel</label>
       <input id="eingabe-schluessel" type="text" required>
     </div>
-    <button type="submit" class="btn primaer" style="width:100%;">Speichern</button>
+    <div class="btn-reihe">
+      <button type="button" class="btn" id="einrichtung-abbrechen" hidden>Zurück</button>
+      <button type="submit" class="btn primaer">Speichern</button>
+    </div>
   </form>
 </div>
 
@@ -34,6 +37,7 @@
   <header>
     <h1>Sprachnotiz</h1>
     <span id="warteschlangen-hinweis"></span>
+    <button id="einstellungen-btn" aria-label="Einstellungen">⚙️</button>
   </header>
 
   <main>
