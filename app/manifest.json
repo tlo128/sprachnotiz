@@ -1,0 +1,17 @@
+{
+  "name": "Sprachnotiz",
+  "short_name": "Sprachnotiz",
+  "description": "Sprechen, fertig. Sprachnotizen automatisch strukturiert speichern.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14171c",
+  "theme_color": "#14171c",
+  "orientation": "portrait",
+  "lang": "de",
+  "icons": [
+    { "src": "icon.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

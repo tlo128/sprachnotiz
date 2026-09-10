@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sprachnotiz</title>
+<meta name="theme-color" content="#14171c">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="einrichtung">
+  <h2>Einrichtung</h2>
+  <p>Trag einmalig die Web-App-URL und den geheimen Schlüssel aus deinem Apps-Script-Projekt ein. Beides wird nur in diesem Browser gespeichert.</p>
+  <form id="einrichtung-formular">
+    <div class="feld">
+      <label for="eingabe-url">Web-App-URL</label>
+      <input id="eingabe-url" type="url" placeholder="https://script.google.com/macros/s/.../exec" required>
+    </div>
+    <div class="feld">
+      <label for="eingabe-schluessel">Geheimer Schlüssel</label>
+      <input id="eingabe-schluessel" type="text" required>
+    </div>
+    <button type="submit" class="btn primaer" style="width:100%;">Speichern</button>
+  </form>
+</div>
+
+<div id="app">
+  <header>
+    <h1>Sprachnotiz</h1>
+    <span id="warteschlangen-hinweis"></span>
+  </header>
+
+  <main>
+    <section class="ansicht" id="ansicht-start" data-ansicht="start">
+      <button id="mikrofon-btn" aria-label="Aufnahme starten/stoppen">🎙️</button>
+      <textarea id="text-eingabe" placeholder="Sprich, oder tippe hier deine Notiz..."></textarea>
+      <button id="fertig-btn">Fertig</button>
+    </section>
+
+    <section class="ansicht" id="ansicht-liste" data-ansicht="liste" hidden>
+      <div class="chip-reihe" id="liste-filter-leiste" hidden>
+        <span class="chip" id="liste-filter-text"></span>
+        <button type="button" class="chip klickbar" id="liste-filter-loeschen">✕ Filter entfernen</button>
+      </div>
+      <div class="karten-liste" id="liste-inhalt"></div>
+    </section>
+
+    <section class="ansicht" id="ansicht-suche" data-ansicht="suche" hidden>
+      <input class="suchfeld" id="suche-eingabe" type="search" placeholder="Suchen nach Titel, Person, Projekt...">
+      <div class="karten-liste" id="suche-inhalt"></div>
+    </section>
+
+    <section class="ansicht" id="ansicht-pruefen" data-ansicht="pruefen" hidden>
+      <div class="karten-liste" id="pruefen-inhalt"></div>
+    </section>
+
+    <section class="ansicht" id="ansicht-bearbeiten" data-ansicht="bearbeiten" hidden>
+      <form id="bearbeiten-formular">
+        <div class="feld">
+          <label for="b-titel">Titel</label>
+          <input id="b-titel" type="text">
+        </div>
+        <div class="feld">
+          <label for="b-status">Status</label>
+          <select id="b-status">
+            <option value="offen">offen</option>
+            <option value="erledigt">erledigt</option>
+            <option value="wartend">wartend</option>
+            <option value="prüfen">prüfen</option>
+          </select>
+        </div>
+        <div class="feld">
+          <label for="b-typ">Typ</label>
+          <select id="b-typ">
+            <option value="Aufgabe">Aufgabe</option>
+            <option value="Notiz">Notiz</option>
+            <option value="Entscheidung">Entscheidung</option>
+            <option value="Kontakt">Kontakt</option>
+          </select>
+        </div>
+        <div class="feld">
+          <label for="b-datum">Datum</label>
+          <input id="b-datum" type="date">
+        </div>
+        <div class="feld">
+          <label for="b-erinnerung">Erinnerungsdatum</label>
+          <input id="b-erinnerung" type="date">
+        </div>
+        <div class="feld">
+          <label for="b-person">Person</label>
+          <input id="b-person" type="text">
+        </div>
+        <div class="feld">
+          <label for="b-projekt">Projekt</label>
+          <input id="b-projekt" type="text">
+        </div>
+        <div class="feld">
+          <label for="b-kurzfassung">Kurzfassung</label>
+          <textarea id="b-kurzfassung"></textarea>
+        </div>
+        <div class="btn-reihe">
+          <button type="button" class="btn" id="bearbeiten-abbrechen">Zurück</button>
+          <button type="submit" class="btn primaer">Speichern</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <div id="toast">
+    <span id="toast-text"></span>
+    <button id="toast-rueckgaengig" hidden>Rückgängig</button>
+  </div>
+
+  <nav id="tabs">
+    <button data-ziel="start" class="aktiv"><span class="symbol">🎙️</span>Neu</button>
+    <button data-ziel="liste"><span class="symbol">📋</span>Liste</button>
+    <button data-ziel="suche"><span class="symbol">🔍</span>Suche</button>
+    <button data-ziel="pruefen"><span class="symbol">⚠️</span>Prüfen</button>
+  </nav>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
