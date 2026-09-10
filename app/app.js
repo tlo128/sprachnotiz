@@ -122,7 +122,7 @@ async function warteschlangeSynchronisieren() {
     const eintraege = await warteschlangeAlle();
     for (const eintrag of eintraege) {
       try {
-        await apiErfassen(eintrag.text, eintrag.zeitstempel);
+        cacheNeueEintraege(await apiErfassen(eintrag.text, eintrag.zeitstempel));
         await warteschlangeEntfernen(eintrag.id);
       } catch (fehler) {
         break; // Beim ersten Fehler abbrechen, später erneut versuchen.
@@ -235,6 +235,7 @@ async function fertig() {
   if (navigator.onLine) {
     try {
       const eintraege = await apiErfassen(text, zeitstempel);
+      cacheNeueEintraege(eintraege);
       const ids = eintraege.map((e) => e.ID);
       toastZeigen('Gespeichert', ids);
       return;
@@ -268,13 +269,99 @@ function toastZeigen(nachricht, ruecknaehmbareIds) {
     clearTimeout(toastTimer);
     toast.classList.remove('sichtbar');
     if (ruecknaehmbareIds) {
-      try { await apiRueckgaengig(ruecknaehmbareIds); } catch (e) { /* ignorieren */ }
+      try {
+        await apiRueckgaengig(ruecknaehmbareIds);
+        cacheEintraegeEntfernen(ruecknaehmbareIds);
+      } catch (e) { /* ignorieren */ }
     }
   };
 
   toast.classList.add('sichtbar');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove('sichtbar'), 5000);
+}
+
+/* ===================== Listen-Zwischenspeicher ===================== */
+// Apps Script braucht pro Aufruf oft 1 bis 4 Sekunden (Containerstart bei Google).
+// Deshalb: zuletzt geladene Liste sofort anzeigen, aktuelle Version im Hintergrund holen.
+
+const CACHE_PRAEFIX = 'notiz_liste_';
+const CACHE_FILTER = ['heute_offen', 'pruefen', 'person', 'projekt'];
+
+function cacheSchluessel(filter, wert) {
+  return CACHE_PRAEFIX + filter + (wert ? ':' + wert.toLowerCase() : '');
+}
+
+function cacheLesen(filter, wert) {
+  if (CACHE_FILTER.indexOf(filter) === -1) return null;
+  try {
+    const roh = localStorage.getItem(cacheSchluessel(filter, wert));
+    return roh ? JSON.parse(roh) : null;
+  } catch (e) { return null; }
+}
+
+function cacheSchreiben(filter, wert, eintraege) {
+  if (CACHE_FILTER.indexOf(filter) === -1) return;
+  try { localStorage.setItem(cacheSchluessel(filter, wert), JSON.stringify(eintraege)); } catch (e) { /* voll */ }
+}
+
+// Wendet eine Funktion auf jede gespeicherte Liste an (für lokale Aktualisierung nach Änderungen).
+function cacheAlleAendern(funktion) {
+  Object.keys(localStorage).filter((k) => k.startsWith(CACHE_PRAEFIX)).forEach((schluessel) => {
+    try {
+      const filter = schluessel.slice(CACHE_PRAEFIX.length).split(':')[0];
+      const neu = funktion(JSON.parse(localStorage.getItem(schluessel)) || [], filter);
+      localStorage.setItem(schluessel, JSON.stringify(neu));
+    } catch (e) { localStorage.removeItem(schluessel); }
+  });
+}
+
+function istPruefen(e) { return e['Prüfen'] === true || e.Status === 'prüfen'; }
+
+function heuteIso() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// Neue Einträge (gerade gespeichert) vorne in die passenden Listen einfügen.
+function cacheNeueEintraege(eintraege) {
+  cacheAlleAendern((liste, filter) => {
+    const passend = eintraege.filter((e) => {
+      if (filter === 'heute_offen') return true;
+      if (filter === 'pruefen') return istPruefen(e);
+      return false; // Personen-/Projektfilter werden beim nächsten Anzeigen ohnehin aktualisiert
+    });
+    return passend.concat(liste);
+  });
+}
+
+// Geänderten Eintrag in allen Listen ersetzen bzw. entfernen, wenn er nicht mehr passt.
+function cacheEintragAktualisieren(eintrag) {
+  const heute = heuteIso();
+  cacheAlleAendern((liste, filter) => {
+    const ohne = liste.filter((e) => e.ID !== eintrag.ID);
+    const passt = filter === 'pruefen' ? istPruefen(eintrag)
+      : filter === 'heute_offen' ? (eintrag.Status === 'offen' || String(eintrag.Erstellt || '').substring(0, 10) === heute)
+      : true;
+    if (!passt) return ohne;
+    const index = liste.findIndex((e) => e.ID === eintrag.ID);
+    if (index === -1) return [eintrag].concat(ohne);
+    liste[index] = eintrag;
+    return liste;
+  });
+}
+
+function cacheEintraegeEntfernen(ids) {
+  cacheAlleAendern((liste) => liste.filter((e) => ids.indexOf(e.ID) === -1));
+}
+
+// Beim Start die beiden Tab-Listen im Hintergrund holen, damit sie beim Antippen schon da sind.
+async function listenVorladen() {
+  const { url, schluessel } = konfigLaden();
+  if (!url || !schluessel || !navigator.onLine) return;
+  for (const filter of ['heute_offen', 'pruefen']) {
+    try { cacheSchreiben(filter, '', await apiListe(filter)); } catch (e) { break; }
+  }
 }
 
 /* ===================== Ansichten / Navigation ===================== */
@@ -299,11 +386,27 @@ function ansichtZeigen(name) {
 
 async function listeLaden(containerId, filter, wert) {
   const container = document.getElementById(containerId);
-  container.innerHTML = '<p class="leer-hinweis">Lädt…</p>';
+  const anfrage = String(Date.now()) + Math.random();
+  container.dataset.anfrage = anfrage; // nur die jüngste Anfrage darf rendern
+
+  const gespeichert = cacheLesen(filter, wert);
+  if (gespeichert) {
+    eintraegeRendern(gespeichert, container);
+  } else {
+    container.innerHTML = '<p class="leer-hinweis">Lädt…</p>';
+  }
+
   try {
     const eintraege = await apiListe(filter, wert);
+    cacheSchreiben(filter, wert, eintraege);
+    if (container.dataset.anfrage !== anfrage) return;
     eintraegeRendern(eintraege, container);
   } catch (fehler) {
+    if (container.dataset.anfrage !== anfrage) return;
+    if (gespeichert) {
+      toastZeigen('Keine Verbindung, zeige letzten Stand', null);
+      return;
+    }
     const hinweis = document.createElement('p');
     hinweis.className = 'fehler-hinweis';
     hinweis.textContent = 'Keine Verbindung zum Sheet. ' + fehler.message;
@@ -451,7 +554,8 @@ document.getElementById('bearbeiten-formular').addEventListener('submit', async 
     'Prüfen': false // wurde gerade vom Nutzer durchgesehen
   };
   try {
-    await apiAendern(bearbeitenAktuelleId, felder);
+    const eintrag = await apiAendern(bearbeitenAktuelleId, felder);
+    cacheEintragAktualisieren(eintrag);
     ansichtZeigen('liste');
   } catch (fehler) {
     alert('Speichern fehlgeschlagen: ' + fehler.message);
@@ -498,7 +602,7 @@ document.getElementById('einrichtung-formular').addEventListener('submit', (ev) 
   konfigSpeichern(url, schluessel);
   document.getElementById('einrichtung').hidden = true;
   document.getElementById('einrichtung-abbrechen').hidden = false;
-  warteschlangeSynchronisieren();
+  warteschlangeSynchronisieren().then(listenVorladen);
 });
 
 /* ===================== Start ===================== */
@@ -522,7 +626,7 @@ if (!erkennungVerfuegbar()) {
 verbindungsAnzeigeAktualisieren();
 einrichtungPruefen();
 warteschlangenHinweisAktualisieren();
-warteschlangeSynchronisieren();
+warteschlangeSynchronisieren().then(listenVorladen);
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => { /* Offline-Cache optional */ });
