@@ -88,7 +88,7 @@ function testAktionen() {
   Logger.log('  -> nach uebernehmen: Eingang=%s Status=%s Typ=%s (Eingang sollte "nein" sein)', e1b.Eingang, e1b.Status, e1b.Typ);
 
   var e1c = aktionVerschieben_(e1.ID, '2026-09-20');
-  Logger.log('  -> nach verschieben: Datum=%s (sollte 2026-09-20 sein)', e1c.Datum);
+  Logger.log('  -> nach verschieben: Datum=%s Status=%s (Datum 2026-09-20, Status offen erwartet)', e1c.Datum, e1c.Status);
 
   var e1d = aktionErledigt_(e1.ID);
   Logger.log('  -> nach erledigt: Status=%s (sollte erledigt sein)', e1d.Status);
@@ -103,4 +103,34 @@ function testAktionen() {
   Logger.log('Eintrag 2 gelöscht, Zeile jetzt: %s (sollte -1 sein)', findeZeileNachId_(notizen, e2.ID));
 
   Logger.log('Fertig. Im Ausführungsprotokoll sollten dazwischen auch [Outlook-Stub]-Zeilen für Eintrag 1 auftauchen.');
+}
+
+// Prüft, ob die Uhrzeit-Spalte als Klartext gespeichert wird (nicht von Sheets in einen
+// Zeitwert umgewandelt - das war ein Bug: "14:00" wurde zu "1899-12-30T14:00:00").
+// WICHTIG: vorher einrichtenSheet() ausführen, sonst greift die Klartext-Formatierung noch
+// nicht. Im Editor ausführen: testUhrzeitAlsText()
+function testUhrzeitAlsText() {
+  var jetzt = '2026-09-09T10:00:00+02:00';
+  var eintraege = verarbeite('Morgen um 14 Uhr Besichtigung mit Herrn Bauer im Lindenpark.', jetzt);
+  var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
+  var geschrieben = zeileZuObjekt_(notizen.getRange(findeZeileNachId_(notizen, eintraege[0].ID), 1, 1, SPALTEN_NOTIZEN.length).getValues()[0]);
+  Logger.log('Uhrzeit direkt aus dem Sheet gelesen: "%s" (sollte "14:00" sein, NICHT "1899-12-30T...")', geschrieben.Uhrzeit);
+}
+
+// Prüft die Idempotenz: derselbe clientId-Aufruf darf keine zweite Zeile erzeugen.
+// Im Editor ausführen: testIdempotenz()
+function testIdempotenz() {
+  var jetzt = '2026-09-09T10:00:00+02:00';
+  var clientId = 'test-idempotenz-' + new Date().getTime();
+  var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
+  var vorher = notizen.getLastRow();
+
+  var erster = verarbeite('Idempotenz-Testnotiz, kann danach gelöscht werden.', jetzt, clientId);
+  var nachErstem = notizen.getLastRow();
+  Logger.log('Nach erstem Aufruf: %s neue Zeile(n) (erwartet: mind. 1)', nachErstem - vorher);
+
+  var zweiter = verarbeite('Idempotenz-Testnotiz, kann danach gelöscht werden.', jetzt, clientId);
+  var nachZweitem = notizen.getLastRow();
+  Logger.log('Nach zweitem Aufruf mit GLEICHER clientId: %s neue Zeile(n) seit erstem Aufruf (erwartet: 0)', nachZweitem - nachErstem);
+  Logger.log('Gleiche ID zurückgegeben: %s (erwartet: true)', erster[0].ID === zweiter[0].ID);
 }

@@ -19,12 +19,38 @@ function einrichtenSheet() {
   Logger.log('Sheet-Struktur eingerichtet: ' + SHEET_NOTIZEN + ', ' + SHEET_PERSONEN + ', ' + SHEET_PROJEKTE);
 }
 
+// Backend liest/schreibt Spalten rein nach Position (SPALTEN_NOTIZEN-Index). Wird die
+// Kopfzeile manuell verändert (Spalte verschoben/umbenannt), würde das sonst still zu
+// falsch zugeordneten Werten führen. Deshalb vor jedem Aufruf prüfen.
+function notizenHeaderPruefen_() {
+  var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
+  if (!notizen) throw new Error('Blatt "' + SHEET_NOTIZEN + '" fehlt. Bitte einrichtenSheet() im Editor ausführen.');
+  var header = notizen.getRange(1, 1, 1, SPALTEN_NOTIZEN.length).getValues()[0];
+  var passt = SPALTEN_NOTIZEN.every(function (spalte, i) { return header[i] === spalte; });
+  if (!passt) {
+    throw new Error('Spalten im Blatt "' + SHEET_NOTIZEN + '" stimmen nicht mit dem erwarteten Datenmodell überein ' +
+      '(wurden vermutlich manuell verschoben/umbenannt). Bitte einrichtenSheet() im Editor ausführen und die Kopfzeile prüfen.');
+  }
+}
+
 /**
  * Legt "Notizen" frisch an, oder migriert ein bestehendes Blatt auf das
  * aktuelle Datenmodell: fehlende Spalten werden an der richtigen Stelle
  * eingefügt (nicht ans Ende gehängt), damit bestehende Daten nicht unter
  * falschen Überschriften landen. Mehrfach sicher ausführbar.
  */
+// Spalten, die reinen (unausgewerteten) Text enthalten müssen: verhindert, dass Sheets
+// ein diktiertes/getipptes "=..." als Formel ausführt (Titel, Person, Projekt, Kurzfassung,
+// Originaltext), und dass "14:00" in der Uhrzeit-Spalte zu einem Zeitwert konvertiert wird
+// (das würde vorschlagText(), die Sortierung und das Bearbeiten-Feld <input type="time"> brechen).
+var NOTIZEN_TEXTSPALTEN = ['Titel', 'Person', 'Projekt', 'Uhrzeit', 'Kurzfassung', 'Originaltext'];
+
+function spalteAlsTextFormatieren_(sheet, header, spaltenName) {
+  var index = header.indexOf(spaltenName);
+  if (index === -1) return;
+  sheet.getRange(1, index + 1, Math.max(sheet.getMaxRows(), 1000), 1).setNumberFormat('@');
+}
+
 function notizenDatenmodellMigrieren_(ss) {
   var notizen = ss.getSheetByName(SHEET_NOTIZEN);
   if (!notizen) {
@@ -32,6 +58,7 @@ function notizenDatenmodellMigrieren_(ss) {
     notizen.getRange(1, 1, 1, SPALTEN_NOTIZEN.length).setValues([SPALTEN_NOTIZEN]);
     notizen.setFrozenRows(1);
     notizen.getRange(1, 1, 1, SPALTEN_NOTIZEN.length).setFontWeight('bold');
+    NOTIZEN_TEXTSPALTEN.forEach(function (spalte) { spalteAlsTextFormatieren_(notizen, SPALTEN_NOTIZEN, spalte); });
     return notizen;
   }
 
@@ -64,6 +91,10 @@ function notizenDatenmodellMigrieren_(ss) {
   notizenBestandsdatenMigrieren_(notizen);
   notizen.setFrozenRows(1);
   notizen.getRange(1, 1, 1, notizen.getLastColumn()).setFontWeight('bold');
+
+  var aktuellerHeader = notizen.getRange(1, 1, 1, notizen.getLastColumn()).getValues()[0];
+  NOTIZEN_TEXTSPALTEN.forEach(function (spalte) { spalteAlsTextFormatieren_(notizen, aktuellerHeader, spalte); });
+
   return notizen;
 }
 
@@ -99,5 +130,7 @@ function sheetSicherstellen_(ss, name, spalten) {
   sheet.setFrozenRows(1);
   var kopfBereich = sheet.getRange(1, 1, 1, spalten.length);
   kopfBereich.setFontWeight('bold');
+  spalteAlsTextFormatieren_(sheet, spalten, 'Name');
+  spalteAlsTextFormatieren_(sheet, spalten, 'Schreibvarianten');
   return sheet;
 }

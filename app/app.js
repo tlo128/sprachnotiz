@@ -2,7 +2,7 @@
 
 // Bei jeder Änderung an der PWA erhöhen. Der Cache-Name in sw.js zieht mit (gleiche Nummer),
 // damit das Handy die neue Version beim zweiten Start sicher übernimmt.
-const APP_VERSION = '2.2';
+const APP_VERSION = '2.4';
 const APP_STAND = '15.09.2026';
 
 /* ===================== Konfiguration ===================== */
@@ -39,11 +39,18 @@ function dbOeffnen() {
   });
 }
 
-async function warteschlangeHinzufuegen(text, zeitstempel) {
+// Erzeugt eine Kennung pro Erfassungsversuch (nicht pro Notiz-Inhalt), damit der Server
+// erkennt, wenn eine bereits verarbeitete Anfrage erneut ankommt (Antwort ging beim
+// ersten Mal verloren) - verhindert doppelte Zeilen und doppelte Claude-Kosten.
+function clientIdErzeugen_() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+
+async function warteschlangeHinzufuegen(text, zeitstempel, clientId) {
   const db = await dbOeffnen();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).add({ typ: 'erfassen', text, zeitstempel });
+    tx.objectStore(STORE).add({ typ: 'erfassen', text, zeitstempel, clientId });
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
   });
@@ -111,8 +118,8 @@ async function apiAufruf(daten) {
   return antwort;
 }
 
-async function apiErfassen(text, zeitstempel) {
-  return (await apiAufruf({ aktion: 'erfassen', text, zeitstempel })).eintraege;
+async function apiErfassen(text, zeitstempel, clientId) {
+  return (await apiAufruf({ aktion: 'erfassen', text, zeitstempel, clientId })).eintraege;
 }
 
 async function apiListe(filter, wert) {
@@ -137,11 +144,17 @@ async function warteschlangeSynchronisieren() {
         if (eintrag.typ === 'aktion') {
           await aktionSynchronisieren_(eintrag);
         } else {
-          cacheNeueEintraege(await apiErfassen(eintrag.text, eintrag.zeitstempel));
+          cacheNeueEintraege(await apiErfassen(eintrag.text, eintrag.zeitstempel, eintrag.clientId));
         }
         await warteschlangeEntfernen(eintrag.id);
       } catch (fehler) {
-        break; // Beim ersten Fehler abbrechen, später erneut versuchen.
+        if (fehler instanceof NetzFehler) {
+          break; // Netzproblem - Reihenfolge bleibt erhalten, später erneut versuchen.
+        }
+        // Fachlicher Fehler (z.B. Eintrag inzwischen gelöscht) kann nie klappen - sonst
+        // blockiert er alle danach gepufferten Notizen/Aktionen für immer.
+        await warteschlangeEntfernen(eintrag.id);
+        toastZeigen('Konnte nicht nachgesendet werden: ' + fehler.message, null);
       }
     }
   } finally {
@@ -203,7 +216,6 @@ function erkennungStarten() {
     if (neuerText) {
       const feld = document.getElementById('text-eingabe');
       feld.value = (feld.value ? feld.value + ' ' : '') + neuerText.trim();
-      stilleTimerZuruecksetzen();
     }
   };
 
@@ -238,22 +250,9 @@ function mikrofonAnsichtAktualisieren() {
   document.getElementById('mikrofon-btn').classList.toggle('hoert-zu', erkennungLaeuft);
 }
 
-/* ===================== Stille-Timer (8 Sekunden Sicherheitsnetz) ===================== */
-
-let stilleTimer = null;
-
-function stilleTimerZuruecksetzen() {
-  clearTimeout(stilleTimer);
-  const text = document.getElementById('text-eingabe').value.trim();
-  if (text) {
-    stilleTimer = setTimeout(fertig, 8000);
-  }
-}
-
 /* ===================== Fertig / Speichern ===================== */
 
 async function fertig() {
-  clearTimeout(stilleTimer);
   erkennungStoppen();
 
   const feld = document.getElementById('text-eingabe');
@@ -262,10 +261,11 @@ async function fertig() {
   feld.value = '';
 
   const zeitstempel = new Date().toISOString();
+  const clientId = clientIdErzeugen_();
 
   if (navigator.onLine) {
     try {
-      const eintraege = await apiErfassen(text, zeitstempel);
+      const eintraege = await apiErfassen(text, zeitstempel, clientId);
       cacheNeueEintraege(eintraege);
       const ids = eintraege.map((e) => e.ID);
       toastZeigen('Gespeichert', ids);
@@ -277,11 +277,12 @@ async function fertig() {
         toastZeigen('Nicht gespeichert: ' + fehler.message, null);
         return;
       }
-      // Server nicht erreichbar trotz "online" -> puffern
+      // Server nicht erreichbar trotz "online" -> puffern. Dieselbe clientId geht mit in
+      // die Warteschlange, falls die Anfrage den Server trotz Fehler schon erreicht hat.
     }
   }
 
-  await warteschlangeHinzufuegen(text, zeitstempel);
+  await warteschlangeHinzufuegen(text, zeitstempel, clientId);
   warteschlangenHinweisAktualisieren();
   toastZeigen('Offline gespeichert – wird nachgesendet', null);
 }
@@ -499,6 +500,16 @@ function aktuelleAnsichtAktualisieren() {
   if (aktiveListenAnsicht) listeLaden(aktiveListenAnsicht.containerId, aktiveListenAnsicht.filter, aktiveListenAnsicht.wert);
 }
 
+// Wie aktuelleAnsichtAktualisieren(), aber ohne Netzaufruf: nur aus dem (bereits
+// optimistisch aktualisierten) Cache neu zeichnen. Für die Offline-Zweige in
+// aktionAusfuehren() - ein echter listeLaden()-Versuch würde dort sofort scheitern und
+// mit "Keine Verbindung, zeige letzten Stand" den gerade gezeigten Offline-Toast überschreiben.
+function aktuelleAnsichtAusCacheRendern() {
+  if (!aktiveListenAnsicht) return;
+  const gecached = cacheLesen(aktiveListenAnsicht.filter, aktiveListenAnsicht.wert);
+  if (gecached) eintraegeRendern(gecached, document.getElementById(aktiveListenAnsicht.containerId));
+}
+
 async function listeLaden(containerId, filter, wert) {
   aktiveListenAnsicht = { containerId, filter, wert };
   const container = document.getElementById(containerId);
@@ -514,10 +525,13 @@ async function listeLaden(containerId, filter, wert) {
 
   try {
     const eintraege = await apiListe(filter, wert);
+    // Erst prüfen, ob diese Antwort noch die jüngste Anfrage ist - sonst könnte eine
+    // langsamere ältere Antwort den Cache nach einer bereits eingetroffenen neueren
+    // Antwort wieder mit veralteten Daten überschreiben.
+    if (container.dataset.anfrage !== anfrage) return;
     cacheSchreiben(filter, wert, eintraege);
     letzteAktualisierung = new Date();
     aktualisierungsHinweisAktualisieren();
-    if (container.dataset.anfrage !== anfrage) return;
     eintraegeRendern(eintraege, container);
   } catch (fehler) {
     if (container.dataset.anfrage !== anfrage) return;
@@ -646,7 +660,7 @@ function karteErstellen(eintrag) {
 
   const vorschlagZeile = document.createElement('div');
   vorschlagZeile.className = 'vorschlag-zeile';
-  if (eintrag.Eingang === 'ja') {
+  if (eintrag.Eingang === 'ja' && eintrag.Aktion_Vorschlag) {
     const text = document.createElement('span');
     text.className = 'vorschlag-text';
     text.textContent = vorschlagText(eintrag);
@@ -661,6 +675,18 @@ function karteErstellen(eintrag) {
     andereBtn.textContent = 'Andere Aktion';
     andereBtn.addEventListener('click', (ev) => { ev.stopPropagation(); aktionenMenuOeffnen(eintrag); });
     vorschlagZeile.append(text, uebernehmenBtn, andereBtn);
+  } else if (eintrag.Eingang === 'ja') {
+    // Im Eingang, aber ohne Vorschlag (z.B. Rohtext-Fallback) - kein Übernehmen-Button,
+    // der ins Leere liefe, aber ein Hinweis plus normaler Aktion-Button.
+    const text = document.createElement('span');
+    text.className = 'vorschlag-text';
+    text.textContent = vorschlagText(eintrag);
+    const andereBtn = document.createElement('button');
+    andereBtn.type = 'button';
+    andereBtn.className = 'btn-andere-aktion';
+    andereBtn.textContent = 'Aktion wählen';
+    andereBtn.addEventListener('click', (ev) => { ev.stopPropagation(); aktionenMenuOeffnen(eintrag); });
+    vorschlagZeile.append(text, andereBtn);
   } else {
     const andereBtn = document.createElement('button');
     andereBtn.type = 'button';
@@ -710,7 +736,7 @@ function swipeAktivieren(karte, eintrag) {
     karte.style.transform = '';
     if (!aktiv) { startX = null; return; }
     if (deltaX > schwelle) {
-      aktionAusfuehren(eintrag.Eingang === 'ja' ? 'uebernehmen' : 'erledigt', eintrag);
+      aktionAusfuehren(eintrag.Eingang === 'ja' && eintrag.Aktion_Vorschlag ? 'uebernehmen' : 'erledigt', eintrag);
     } else if (deltaX < -schwelle) {
       aktionenMenuOeffnen(eintrag);
     }
@@ -740,7 +766,7 @@ async function aktionAusfuehren(aktion, eintrag, extra) {
     cacheEintraegeEntfernen([eintrag.ID]);
     warteschlangenHinweisAktualisieren();
     toastZeigen('Offline gelöscht – wird nachgesendet', null);
-    aktuelleAnsichtAktualisieren();
+    aktuelleAnsichtAusCacheRendern();
     return;
   }
 
@@ -766,7 +792,7 @@ async function aktionAusfuehren(aktion, eintrag, extra) {
   cacheEintragAktualisieren(eintragOptimistischAendern_(eintrag, aktion, extra));
   warteschlangenHinweisAktualisieren();
   toastZeigen('Offline gespeichert – wird nachgesendet', null);
-  aktuelleAnsichtAktualisieren();
+  aktuelleAnsichtAusCacheRendern();
 }
 
 /* ===================== Aktionen-Menü (Bottom Sheet) ===================== */
@@ -814,6 +840,13 @@ document.getElementById('aktionen-menu-liste').addEventListener('click', async (
     await aktionAusfuehren('loeschen', eintrag);
     return;
   }
+  if ((aktion === 'aufgabe' || aktion === 'termin') && !eintrag.Datum) {
+    // Ohne Datum lässt sich weder eine Fälligkeit noch ein Kalendertermin anlegen -
+    // zum Bearbeiten-Formular, wo Datum (und bei Termin Uhrzeit) gesetzt werden kann.
+    aktionenMenuSchliessen();
+    bearbeitenOeffnen(Object.assign({}, eintrag, { Typ: aktion === 'aufgabe' ? 'Aufgabe' : 'Termin' }));
+    return;
+  }
   aktionenMenuSchliessen();
   await aktionAusfuehren(aktion, eintrag);
 });
@@ -821,7 +854,10 @@ document.getElementById('aktionen-menu-liste').addEventListener('click', async (
 document.getElementById('verschieben-liste').addEventListener('click', async (ev) => {
   const tage = ev.target.dataset.verschieben;
   if (!tage || !aktuellesMenuEintrag) return;
-  const ziel = new Date();
+  // Ausgangspunkt ist das bisherige Datum des Eintrags, nicht heute - sonst würde
+  // "+1 Tag" einen für nächsten Freitag geplanten Termin auf morgen zurückwerfen.
+  const basis = aktuellesMenuEintrag.Datum ? new Date(aktuellesMenuEintrag.Datum) : new Date();
+  const ziel = new Date(basis);
   ziel.setDate(ziel.getDate() + Number(tage));
   const eintrag = aktuellesMenuEintrag;
   aktionenMenuSchliessen();
@@ -945,8 +981,6 @@ document.getElementById('mikrofon-btn').addEventListener('click', () => {
 });
 
 document.getElementById('fertig-btn').addEventListener('click', fertig);
-
-document.getElementById('text-eingabe').addEventListener('input', stilleTimerZuruecksetzen);
 
 document.querySelectorAll('#tabs button').forEach((btn) => {
   btn.addEventListener('click', () => ansichtZeigen(btn.dataset.ziel));

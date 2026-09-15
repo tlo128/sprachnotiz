@@ -66,7 +66,7 @@ function systemPrompt_(jetztText, personenListe, projekteListe) {
 function rufeClaudeAuf_(modell, text, jetztText, personenListe, projekteListe) {
   var payload = {
     model: modell,
-    max_tokens: 2000,
+    max_tokens: 4000,
     system: systemPrompt_(jetztText, personenListe, projekteListe),
     tools: [strukturTool_()],
     tool_choice: { type: 'tool', name: STRUKTUR_TOOL_NAME },

@@ -10,6 +10,7 @@ function doPost(e) {
     if (!schluesselGueltig_(daten.schluessel)) {
       antwort = { ok: false, fehler: 'Ungültiger Schlüssel.' };
     } else {
+      notizenHeaderPruefen_();
       antwort = aktionAusfuehren_(daten);
     }
   } catch (fehler) {
@@ -59,7 +60,7 @@ function aktionAusfuehren_(daten) {
       if (text.length > MAX_TEXTLAENGE) {
         return { ok: false, fehler: 'Text zu lang (max. ' + MAX_TEXTLAENGE + ' Zeichen).' };
       }
-      return { ok: true, eintraege: verarbeite(text, daten.zeitstempel) };
+      return { ok: true, eintraege: verarbeite(text, daten.zeitstempel, daten.clientId) };
     default:
       return { ok: false, fehler: 'Unbekannte Aktion.' };
   }

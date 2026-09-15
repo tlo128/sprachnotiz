@@ -35,6 +35,15 @@ var CONFIDENCE_SCHWELLE = 0.7;
 var ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 var ANTHROPIC_VERSION = '2023-06-01';
 
+// Erzwingt Klartext beim Schreiben ins Sheet - verhindert, dass ein diktierter/getippter
+// Wert mit führendem "=" als Formel ausgeführt wird, und dass etwas wie "14:00" in der
+// Uhrzeit-Spalte in einen Zeitwert umgewandelt wird. setNumberFormat('@') allein genügt
+// dafür bei per API geschriebenen Werten nicht (getestet: wird trotzdem konvertiert) -
+// das führende Apostroph ist der zuverlässige Weg, wie auch bei manueller Eingabe in Sheets.
+function klartext_(wert) {
+  return (typeof wert === 'string' && wert !== '') ? "'" + wert : wert;
+}
+
 function scriptEigenschaft_(name) {
   var wert = PropertiesService.getScriptProperties().getProperty(name);
   if (!wert) {

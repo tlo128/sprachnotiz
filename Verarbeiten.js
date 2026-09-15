@@ -25,31 +25,60 @@ function uhrzeitAusText_(text) {
 
 /**
  * Verarbeitet eine Sprachnotiz: ruft Claude auf, gleicht Namen ab und schreibt
- * die resultierenden Zeilen ins Blatt "Notizen".
+ * die resultierenden Zeilen ins Blatt "Notizen". Rohtext wird immer gespeichert,
+ * auch wenn Claude fehlschlägt, ein leeres Ergebnis liefert oder das Schreiben
+ * selbst scheitert (z.B. Lock-Timeout) - dafür deckt der try-Block alles ab, nicht
+ * nur den Claude-Aufruf.
  * @param {string} text Roher Notiztext.
  * @param {string} zeitstempel ISO-Zeitstempel, wann die Notiz gesprochen wurde.
+ * @param {string} [clientId] Kennung des Erfassungsversuchs (nicht des Inhalts) von der
+ *   PWA. Verhindert doppelte Zeilen, wenn eine Antwort verloren geht und die PWA denselben
+ *   Aufruf erneut sendet.
  * @return {Array} Die geschriebenen Einträge (als einfache Objekte).
  */
-function verarbeite(text, zeitstempel) {
+function verarbeite(text, zeitstempel, clientId) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var notizen = ss.getSheetByName(SHEET_NOTIZEN);
   var personen = ss.getSheetByName(SHEET_PERSONEN);
   var projekte = ss.getSheetByName(SHEET_PROJEKTE);
-
   var jetzt = zeitstempel ? new Date(zeitstempel) : new Date();
-  var jetztText = jetztAlsText_(jetzt);
 
-  var ergebnis;
-  var muessenPruefen = false;
+  var cacheSchluessel = clientId ? 'erfassen_' + clientId : null;
+  if (cacheSchluessel) {
+    var zwischengespeichert = CacheService.getScriptCache().get(cacheSchluessel);
+    if (zwischengespeichert) {
+      Logger.log('Bereits verarbeitet (clientId ' + clientId + '), Ergebnis aus Cache.');
+      return JSON.parse(zwischengespeichert);
+    }
+  }
 
+  var geschrieben;
   try {
-    ergebnis = rufeClaudeAuf_(
-      MODELL_HAIKU, text, jetztText,
-      ladeNamenslisteAlsText_(personen), ladeNamenslisteAlsText_(projekte)
-    );
-  } catch (fehlerHaiku) {
-    Logger.log('Haiku-Aufruf fehlgeschlagen: ' + fehlerHaiku);
-    return [schreibeRohtextZeile_(notizen, text, jetzt)];
+    geschrieben = verarbeiteMitClaude_(text, jetzt, notizen, personen, projekte);
+  } catch (fehler) {
+    Logger.log('Verarbeitung fehlgeschlagen, speichere Rohtext: ' + fehler);
+    geschrieben = [schreibeRohtextZeile_(notizen, text, jetzt)];
+  }
+
+  if (cacheSchluessel) {
+    try {
+      CacheService.getScriptCache().put(cacheSchluessel, JSON.stringify(geschrieben), 21600);
+    } catch (fehlerCache) {
+      Logger.log('Idempotenz-Cache konnte nicht geschrieben werden: ' + fehlerCache);
+    }
+  }
+  return geschrieben;
+}
+
+function verarbeiteMitClaude_(text, jetzt, notizen, personen, projekte) {
+  var jetztText = jetztAlsText_(jetzt);
+  var ergebnis = rufeClaudeAuf_(
+    MODELL_HAIKU, text, jetztText,
+    ladeNamenslisteAlsText_(personen), ladeNamenslisteAlsText_(projekte)
+  );
+
+  if (!ergebnis.eintraege || ergebnis.eintraege.length === 0) {
+    throw new Error('Claude hat keine Einträge geliefert.');
   }
 
   var unsicher = ergebnis.eintraege.length > 1 || ergebnis.eintraege.some(function (e) {
@@ -57,13 +86,15 @@ function verarbeite(text, zeitstempel) {
       (e.person_aliase && e.person_aliase.length) || (e.projekt_aliase && e.projekt_aliase.length);
   });
 
+  var muessenPruefen = false;
   if (unsicher) {
     muessenPruefen = true;
     try {
-      ergebnis = rufeClaudeAuf_(
+      var ergebnisSonnet = rufeClaudeAuf_(
         MODELL_SONNET, text, jetztText,
         ladeNamenslisteAlsText_(personen), ladeNamenslisteAlsText_(projekte)
       );
+      if (ergebnisSonnet.eintraege && ergebnisSonnet.eintraege.length > 0) ergebnis = ergebnisSonnet;
     } catch (fehlerSonnet) {
       Logger.log('Sonnet-Aufruf fehlgeschlagen, verwende Haiku-Ergebnis: ' + fehlerSonnet);
     }
@@ -72,21 +103,34 @@ function verarbeite(text, zeitstempel) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    var geschrieben = ergebnis.eintraege.map(function (eintrag) {
+    return ergebnis.eintraege.map(function (eintrag) {
       return schreibeEintragZeile_(notizen, personen, projekte, eintrag, text, jetzt, muessenPruefen);
     });
   } finally {
     lock.releaseLock();
   }
-
-  return geschrieben;
 }
 
+// Persistenter Zähler in den Script-Eigenschaften statt "letzte Zeile + 1": bleibt auch
+// dann eindeutig, wenn die zuletzt angelegte Zeile gelöscht oder das Sheet manuell
+// umsortiert wird. Der Abgleich mit der ID-Spalte fängt zusätzlich Fälle ab, in denen
+// jemand von Hand eine höhere ID eingetragen hat.
 function naechsteId_(sheet) {
+  var eigenschaften = PropertiesService.getScriptProperties();
+  var hoechste = Number(eigenschaften.getProperty('LETZTE_ID')) || 0;
+
   var letzteZeile = sheet.getLastRow();
-  if (letzteZeile < 2) return 1;
-  var letzteId = Number(sheet.getRange(letzteZeile, 1).getValue());
-  return (isNaN(letzteId) ? letzteZeile - 1 : letzteId) + 1;
+  if (letzteZeile >= 2) {
+    var idSpalte = sheet.getRange(2, 1, letzteZeile - 1, 1).getValues();
+    idSpalte.forEach(function (zeile) {
+      var wert = Number(zeile[0]);
+      if (!isNaN(wert) && wert > hoechste) hoechste = wert;
+    });
+  }
+
+  var naechste = hoechste + 1;
+  eigenschaften.setProperty('LETZTE_ID', String(naechste));
+  return naechste;
 }
 
 function schreibeEintragZeile_(notizen, personen, projekte, eintrag, originaltext, jetzt, muessenPruefen) {
@@ -119,7 +163,7 @@ function schreibeEintragZeile_(notizen, personen, projekte, eintrag, originaltex
     Geaendert: jetzt
   };
 
-  notizen.appendRow(SPALTEN_NOTIZEN.map(function (spalte) { return zeile[spalte]; }));
+  notizen.appendRow(SPALTEN_NOTIZEN.map(function (spalte) { return klartext_(zeile[spalte]); }));
   return zeile;
 }
 
@@ -150,7 +194,7 @@ function schreibeRohtextZeile_(notizen, originaltext, jetzt) {
   lock.waitLock(30000);
   try {
     zeile.ID = naechsteId_(notizen);
-    notizen.appendRow(SPALTEN_NOTIZEN.map(function (spalte) { return zeile[spalte]; }));
+    notizen.appendRow(SPALTEN_NOTIZEN.map(function (spalte) { return klartext_(zeile[spalte]); }));
   } finally {
     lock.releaseLock();
   }

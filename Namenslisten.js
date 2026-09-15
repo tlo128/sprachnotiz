@@ -35,7 +35,7 @@ function nameAbgleichen_(sheet, name, jetzt) {
     }
   }
 
-  sheet.appendRow([name, '', jetzt]);
+  sheet.appendRow([klartext_(name), '', jetzt]);
   return { kanonisch: name, istNeu: true };
 }
 
@@ -66,7 +66,7 @@ function aliaseHinzufuegen_(sheet, kanonischerName, aliase, jetzt) {
       }
     });
 
-    sheet.getRange(i + 2, 2).setValue(vorhandene.join(', '));
+    sheet.getRange(i + 2, 2).setValue(klartext_(vorhandene.join(', ')));
     sheet.getRange(i + 2, 3).setValue(jetzt);
     return;
   }
