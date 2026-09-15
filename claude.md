@@ -1,116 +1,97 @@
-# Sprachnotiz-App, Google-Variante
+# Sprachnotiz-App, Google-Variante mit Outlook-Anbindung
 
-Stand: September 2026. Ersetzt den NAS-Plan vollständig.
+Stand: 13. September 2026. Ersetzt alle früheren Fassungen. Sessions 1 bis 3 sind umgesetzt, die E-Mail-Erinnerung aus Session 3 wird in Session 4 wieder entfernt.
 
 ## Ziel
 
-Sprechen, fertig. Eine Sprachnotiz wird automatisch in einen strukturierten Eintrag umgewandelt und gespeichert. Einzelnutzer, keine laufenden Kosten außer Claude-Tokens (ca. 2 bis 3 $ pro Monat).
+Sprechen, fertig. Eine Sprachnotiz wird automatisch strukturiert und gespeichert. Die KI schlägt vor, was daraus wird (Aufgabe, Termin, Ablage). Der Nutzer entscheidet im Eingang mit einem Tipp. Aufgaben und Termine leben danach in Outlook (Microsoft To Do und Kalender) weiter, in beide Richtungen abgeglichen. Einzelnutzer, keine laufenden Kosten außer Claude-Tokens (ca. 2 bis 3 $ pro Monat).
 
 ## Bausteine
 
 | Baustein | Aufgabe |
 |---|---|
-| Google Sheet "Notizen" | Datenbank. Eine Zeile pro Eintrag. Am PC direkt nutzbar (Filter, Suche). |
-| Google Apps Script (am Sheet gebunden) | Backend. Nimmt Text an, ruft Claude auf, schreibt die Zeile, verschickt Erinnerungs-Mails. |
-| PWA auf GitHub Pages | Oberfläche fürs Handy und den PC. Mikrofon-Button, Liste, Suche. Läuft offline an und puffert Notizen, bis Netz da ist. |
-| Outlook | Empfängt jeden Morgen um 8:00 die Erinnerungs-Mail. |
-| Claude API | Strukturiert den Text. Haiku 4.5 für die Routine, Sonnet 5 bei unsicheren Fällen. |
+| Google Sheet "Notizen" | Datenbank. Eine Zeile pro Eintrag. |
+| Google Apps Script | Backend. Nimmt Text an, ruft Claude auf, schreibt die Zeile, spricht mit Microsoft Graph, gleicht alle 15 Minuten mit Outlook ab. |
+| PWA auf GitHub Pages | Oberfläche auf Handy und PC: Erfassen und Dashboard (Eingang, Heute, Woche, Projekt/Person, Suche). Offline-Puffer. |
+| Microsoft Graph (in M365 enthalten) | Aufgaben in die To-Do-Liste "Notizen", Termine in den Kalender "Notizen". Erinnerungen kommen von Outlook auf allen Geräten. |
+| Claude API | Haiku 4.5 für die Routine, Sonnet 5 bei unsicheren Fällen. |
 
-Kein Server, kein Docker, kein VPN. Einzige zusätzlichen Konten: GitHub (kostenlos) für die Seite.
+Keine E-Mail, kein Push, kein Server, kein Docker.
 
 ## Datenmodell (Spalten im Sheet)
 
-ID | Titel | Datum | Status | Erinnerungsdatum | Person | Projekt | Typ | Kurzfassung | Originaltext | Confidence | Prüfen | Erstellt
+Kernfelder (Pflicht, unverändert): ID | Titel | Datum | Status | Erinnerungsdatum | Person | Projekt | Typ
 
-- Status: offen, erledigt, wartend, prüfen
-- Typ: Aufgabe, Notiz, Entscheidung, Kontakt
-- Blatt "Personen" und Blatt "Projekte": bekannte Namen plus Schreibvarianten, dienen der KI als Abgleichliste, wachsen automatisch
+Zusatzfelder: Uhrzeit | Kurzfassung | Originaltext | Confidence | Prüfen | Eingang | Aktion_Vorschlag | Outlook_ID | Outlook_Typ | Outlook_Geaendert | Erstellt | Geaendert
+
+- Status: offen, erledigt, abgelegt, prüfen
+- Typ: Aufgabe, Termin, Notiz, Entscheidung, Kontakt
+- Eingang: ja, solange der Nutzer den Eintrag noch nicht angefasst hat
+- Aktion_Vorschlag: Aufgabe, Termin, Ablegen (von der KI gesetzt)
+- Outlook_ID und Outlook_Typ (task oder event): Verknüpfung zu Outlook, leer solange nicht übernommen
+- Blätter "Personen" und "Projekte": bekannte Namen plus Schreibvarianten, wachsen automatisch
 
 ## Ablauf im Alltag
 
-1. Homescreen-Icon antippen, Mikrofon-Button drücken, sprechen. Alternativ jederzeit ins Textfeld darunter tippen (Stichworte reichen), auch als Ergänzung oder Korrektur nach dem Sprechen.
-2. "Fertig" antippen. Sicherheitsnetz: Nach 8 Sekunden Stille speichert die App auch ohne Tipp. Kurzer Hinweis "Gespeichert", 5 Sekunden "Rückgängig".
+1. Homescreen-Icon, Mikrofon, sprechen (oder tippen). "Fertig". Gespeichert, mit 5 Sekunden "Rückgängig".
+2. Die KI setzt Typ, Datum, Uhrzeit, Person, Projekt und einen Aktionsvorschlag. Der Eintrag liegt im Eingang.
+3. Im Eingang (Handy oder PC): ein Tipp auf "Übernehmen" führt den Vorschlag aus, oder eine der anderen Aktionen wählen. Erst dann schreibt die App nach Outlook. Nichts geht ohne Entscheidung des Nutzers nach Outlook.
+4. Einträge mit erkanntem Datum erscheinen in der App unter Heute und Woche, auch wenn sie noch im Eingang liegen. Der Eingang blockiert nichts.
 
-Ohne Netz: Die App erkennt das und zeigt stattdessen ein Textfeld. Diktat über die Tastatur (Samsung oder Gboard, Offline-Sprachpaket Deutsch einmal herunterladen). Der Text wird gepuffert und automatisch nachgesendet, sobald Netz da ist.
+Aktionen pro Eintrag (überall gleich): Übernehmen (Vorschlag ausführen), Aufgabe (Fälligkeit, nach To Do), Termin (Datum plus Uhrzeit, in den Kalender), Verschieben (+1 Tag, nächste Woche, Datum wählen), Ablegen (kein Datum, nur noch in der Suche), Erledigt, Bearbeiten, Löschen.
 
-Zugriffsschutz: Apps-Script-Web-App auf "jeder mit Link", jeder Aufruf trägt einen langen geheimen Schlüssel, den die PWA einmal gespeichert hat. Kein Login, kein Passwort im Alltag.
+Abgleich mit Outlook: Änderungen in der App gehen sofort nach Outlook. Abhaken oder Verschieben in To Do oder Outlook wird alle 15 Minuten in die App übernommen. Bei Konflikt gewinnt die zuletzt geänderte Seite.
 
-## Modell-Routing im Betrieb
+Ohne Netz: Textfeld statt Mikrofon, Puffer in IndexedDB, automatisches Nachsenden. Zugriffsschutz: Apps-Script-Web-App "jeder mit Link", jeder Aufruf trägt den geheimen Schlüssel aus den Script-Eigenschaften.
+
+## Modell-Routing
 
 | Aufgabe | Modell | Regel |
 |---|---|---|
-| Text zu Feldern, Namen abgleichen, Datum auflösen | Haiku 4.5 | Immer, ein Aufruf mit festem JSON-Schema |
-| Unsicher (Confidence unter 0,7, neuer Name, mehrere Aufgaben in einem Satz) | Sonnet 5 | Automatischer zweiter Durchlauf, Eintrag bekommt "Prüfen" |
-| Wöchentliche Durchsicht (Duplikate, vergessene Follow-ups) | Opus 5 | Optional, Session 4 |
-| Suche im Sheet | kein Modell | Filter und Volltext im Sheet, 0 $ |
+| Text zu Feldern, Aktionsvorschlag, Namen abgleichen, Datum und Uhrzeit auflösen | Haiku 4.5 | Immer, ein Aufruf, festes JSON-Schema |
+| Unsicher (Confidence unter 0,7, neuer Name, mehrere Aufgaben) | Sonnet 5 | Zweiter Durchlauf, Markierung "prüfen" im Eingang |
+| Wöchentliche Durchsicht | Opus 5 | Optional, später |
+| Suche | kein Modell | Filter im Sheet und in der PWA |
 
-## Wer macht was
+## Outlook-Anbindung (technisch)
 
-| Rolle | Wer | Wann |
-|---|---|---|
-| Planung, Rückfragen, Prompts formulieren, Ergebnisse prüfen | Dieser Chat (Claude Fable 5.1) | Vor und zwischen den Sessions |
-| Code schreiben, testen, ins Apps Script übertragen | Claude Code auf dem PC, Standardmodell belassen. Bei hartnäckigen Fehlern mit /model auf das stärkste verfügbare Modell wechseln | In den Sessions |
-| Konten anlegen, Login-Klicks, API-Key einfügen, Testsätze sprechen | Du | Vorbereitung und Tests |
-| Text strukturieren im laufenden Betrieb | Haiku 4.5, Sonnet 5 | Automatisch, jede Notiz |
+- Delegierte Anmeldung über eine App-Registrierung im eigenen M365-Tenant (Entra). Berechtigungen: Tasks.ReadWrite, Calendars.ReadWrite, offline_access, User.Read. Nur das Konto des Nutzers.
+- Apps Script nutzt die OAuth2-Bibliothek (googleworkspace/apps-script-oauth2). Redirect-URI: https://script.google.com/macros/d/SKRIPT-ID/usercallback
+- Client-ID, Tenant-ID und Client-Secret liegen in den Script-Eigenschaften. Das Secret läuft nach 24 Monaten ab: Erneuerung September 2028.
+- Aufgaben: To-Do-Liste "Notizen" (POST /me/todo/lists, /me/todo/lists/{id}/tasks), mit dueDateTime, reminderDateTime, body = Kurzfassung plus Projekt und Person.
+- Termine: Kalender "Notizen" (POST /me/calendars, /me/calendars/{id}/events), Dauer standardmäßig 60 Minuten, Erinnerung 30 Minuten vorher.
+- Abgleich: zeitgesteuerter Trigger alle 15 Minuten, liest Änderungen aus To Do und Kalender (lastModifiedDateTime nach Outlook_Geaendert), schreibt Status und Datum ins Sheet.
 
-## Vorbereitung (du, ca. 60 Minuten, Details in Startanleitung_und_Prompts.md)
+## Sessions
 
-1. Claude Code installieren: PowerShell öffnen, `irm https://claude.ai/install.ps1 | iex` ausführen, dann `claude` starten und anmelden. Zusätzlich Node.js (LTS) und Git für Windows installieren, jeweils Standard-Installer.
-1a. GitHub-Konto anlegen (kostenlos), Claude Code richtet den Rest ein.
-2. Claude API-Key anlegen (Anthropic Console, getrennt vom Claude.ai-Abo), 10 bis 20 $ Guthaben laden.
-3. Google Sheet anlegen, Name "Notizen", leer lassen. Link kopieren.
-4. Im Sheet: Erweiterungen, Apps Script öffnen, einmal speichern. Damit existiert das Projekt. Unter script.google.com, Einstellungen, "Google Apps Script API" aktivieren.
-5. Notion-Datenbanken (Archiv, Kontakte) als CSV exportieren, Dateien bereitlegen.
-6. Projektordner anlegen, z.B. Dokumente\notiz, diese Datei als CLAUDE.md hineinkopieren.
+Sessions 1 bis 3: erledigt (Backend, PWA, E-Mail-Erinnerung, Notion-Import falls bereits geschehen).
 
-## Sessions mit Claude Code
+### Session 4: Dashboard und Eingang, E-Mail entfernen
 
-Prompt-Muster für jede Session: "Lies CLAUDE.md. Aufgabe dieser Session: [Ziel]. Fertig ist es, wenn: [Test]. Arbeite in kleinen Schritten, sag mir nach jedem Schritt, was ich prüfen soll."
+- Bestandsaufnahme des vorhandenen Codes, dann E-Mail-Trigger und E-Mail-Code entfernen.
+- Datenmodell um die Zusatzfelder erweitern, bestehende Zeilen migrieren (Eingang = nein für alles, was älter ist als der Umbau).
+- Claude-Schema um empfohlene_aktion und uhrzeit erweitern.
+- PWA zum Dashboard umbauen: Eingang mit Vorschlag und Übernehmen, Heute, Woche, Projekt/Person, Suche. Aktionen als Buttons (PC) und Wischgesten (Handy). Outlook-Aktionen rufen bereits Backend-Funktionen auf, die in Session 4 noch nur das Sheet ändern.
+- Fertig, wenn: eine neue Notiz erscheint im Eingang mit Vorschlag, "Übernehmen" verschiebt sie korrekt nach Heute oder Woche oder Archiv, Verschieben und Abhaken funktionieren auf Handy und PC, keine E-Mail kommt mehr.
 
-### Session 1: Backend (ca. 2 Stunden)
+### Session 5: Outlook-Anbindung
 
-- Claude Code richtet `clasp` ein (Google-Werkzeug, mit dem Code direkt ins Apps Script geschoben wird). Du klickst einmal den Google-Login.
-- Sheet-Struktur anlegen (Spalten, Blätter Personen und Projekte).
-- Funktion `verarbeite(text)`: Haiku-Aufruf mit JSON-Schema, Routing zu Sonnet, Zeile schreiben, Namen in die Listen übernehmen. API-Key liegt in den Script-Eigenschaften, nicht im Code.
-- **Test:** 10 Testsätze über eine Testfunktion im Editor, jede erzeugt eine korrekte Zeile. Relative Angaben wie "nächsten Dienstag" werden richtig aufgelöst.
+- OAuth2-Bibliothek einbinden, Anmeldefunktion, einmalige Bestätigung im Browser.
+- Liste "Notizen" in To Do und Kalender "Notizen" anlegen, falls nicht vorhanden.
+- Übernehmen, Aufgabe, Termin, Verschieben, Erledigt, Löschen schreiben nach Outlook. Outlook_ID im Sheet.
+- Abgleich-Trigger alle 15 Minuten.
+- PWA zeigt pro Eintrag ein kleines Outlook-Symbol, wenn verknüpft.
+- Fertig, wenn: eine Aufgabe aus dem Eingang übernommen erscheint innerhalb von Sekunden in To Do auf Handy und PC, Abhaken in To Do setzt den Eintrag in der App spätestens nach 15 Minuten auf erledigt, ein Termin erscheint im Outlook-Kalender mit Erinnerung.
 
-### Session 2: PWA fürs Handy (ca. 3 Stunden)
+### Session 6: Feinschliff
 
-- Apps Script als reine API bereitstellen (doPost/doGet, Zugriff jeder mit Link, Prüfung des geheimen Schlüssels).
-- PWA auf GitHub Pages: Mikrofon-Button (Web Speech API, de-DE, automatischer Neustart bei Pausen), Textfeld als gleichwertiger Eingabeweg (tippen, ergänzen, korrigieren), großer "Fertig"-Button, Auto-Speichern nach 8 Sekunden Stille, Rückgängig-Hinweis, Liste "heute und offen", Suche, Prüfliste, Eintrag bearbeiten.
-- Offline: Service Worker lädt die App ohne Netz, Textfeld statt Mikrofon, Puffer in IndexedDB, automatisches Nachsenden.
-- **Test:** Icon auf dem Galaxy-Homescreen, Notiz gesprochen, Zeile im Sheet ohne weiteren Klick. Flugmodus an, Notiz per Tastatur diktiert, Flugmodus aus, Zeile erscheint. Am PC im Browser dieselbe Liste.
-
-### Session 3: Erinnerungen und Import (ca. 1,5 Stunden)
-
-- Zeitgesteuerter Trigger 8:00: Mail an deine Outlook-Adresse mit allen Einträgen, deren Erinnerungsdatum heute oder überfällig ist, je mit Link zum Eintrag.
-- Import der Notion-CSVs, daraus Personen- und Projektlisten ableiten.
-- **Test:** Testeintrag mit Erinnerung "morgen", am nächsten Morgen kommt die Mail in Outlook. Notion-Daten sind im Sheet durchsuchbar.
-
-### Session 4, optional nach zwei Wochen Nutzung
-
-- Wöchentliche Durchsicht per Opus 5 (Mail mit Vorschlägen).
-- Falls das Offline-Tastatur-Diktat zu ungenau ist: Audio-Aufnahme in der PWA (funktioniert offline) plus "Teilen" aus der Samsung-Sprachmemo-App in die PWA. Transkription über die Gemini API (kostenloses Kontingent, zweiter Schlüssel), danach wie gewohnt Claude. Nur bauen, wenn der Bedarf sich zeigt.
-- Falls gewünscht: tägliche Excel-Kopie nach OneDrive.
-
-## Aktueller Stand (10.09.2026)
-
-Sessions 1 bis 3 sind umgesetzt und im Betrieb. Danach Sicherheits- und Komfortdurchsicht:
-
-- API nur per POST mit JSON-Body, der Schlüssel steht nie in einer URL. doGet lehnt ab. Aktionen: erfassen, liste, aendern, rueckgaengig (Code.js).
-- Web-App-Deployment: eine feste Deployment-ID, neue Backend-Stände mit `clasp push` und anschließend `clasp deploy -i <Deployment-ID> -d "..."` als neue Version auf dasselbe Deployment. Die URL bleibt gleich. `clasp deployments` zeigt die ID.
-- PWA hat eine Versionsnummer: `APP_VERSION` oben in app/app.js, sichtbar im Einstellungs-Bildschirm. Bei jeder PWA-Änderung erhöhen und `CACHE_NAME` in app/sw.js auf dieselbe Nummer setzen. Das Handy übernimmt eine neue Version beim zweiten Start.
-- Listen werden am Handy zwischengespeichert (localStorage) und sofort angezeigt, der Abgleich mit Google läuft im Hintergrund. Grund: Apps Script braucht pro Aufruf 1 bis 4 Sekunden, gelegentlich länger.
-- Fehlerfälle in der PWA: Netzfehler puffern die Notiz, Konfigurations- und Serverfehler zeigen eine Meldung und lassen den Text stehen.
-- Content-Security-Policy in index.html: Verbindungen nur zu script.google.com und script.googleusercontent.com.
-- Textlimit 5000 Zeichen, Status und Typ werden serverseitig validiert, Prüfen-Markierung wird beim Speichern aus dem Bearbeiten-Formular gelöscht.
-- .clasp.json liegt nur lokal (in .gitignore), das Repository ist öffentlich, weil GitHub Pages im kostenlosen Konto das voraussetzt. Es enthält keine Schlüssel, keine URLs, keine Daten.
-- Bekannt und akzeptiert: Bei jeder Notiz geht die komplette Personen- und Projektliste als Kontext an die Claude API.
+- Notion-Import, falls noch offen. Wochen-Durchsicht per Opus 5 als Liste im Dashboard. Kosten-Statistik.
 
 ## Regeln für Claude Code
 
-- Keine zusätzlichen Dienste, Bibliotheken oder Konten ohne Rückfrage.
+- Vor jeder Session zuerst den vorhandenen Code lesen und den Stand in drei Sätzen zusammenfassen, dann erst ändern.
+- Keine zusätzlichen Dienste, Bibliotheken oder Konten ohne Rückfrage. Ausnahme: die OAuth2-Bibliothek für Apps Script in Session 5.
 - Rohtext immer speichern, auch wenn der Claude-Aufruf fehlschlägt (dann Status "prüfen").
-- Zeitzone Europe/Berlin. Sprache der Oberfläche Deutsch.
-- Backend-Änderungen mit `clasp push`, PWA-Änderungen mit `git push` übertragen und mir sagen, wie ich sie teste.
-- Geheimer Schlüssel und API-Key stehen nie im Code oder im Git-Repository.
+- Zeitzone Europe/Berlin. Sprache der Oberfläche Deutsch. Keine Frameworks, keine Build-Schritte in der PWA.
+- Backend-Änderungen mit clasp push, PWA-Änderungen mit git push übertragen und sagen, wie sie zu testen sind.
+- API-Key, geheimer Schlüssel, Microsoft-Secret stehen nie im Code oder im Repository.
