@@ -175,6 +175,7 @@ body.offline #mikrofon-btn, body.keine-spracherkennung #mikrofon-btn { display: 
 .karte .kurzfassung { font-size: 0.9rem; color: var(--text-schwach); margin-top: 4px; }
 
 .chip-reihe { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip-reihe[hidden] { display: none; }
 .chip {
   font-size: 0.78rem;
   padding: 3px 10px;
@@ -185,9 +186,61 @@ body.offline #mikrofon-btn, body.keine-spracherkennung #mikrofon-btn { display: 
 .chip.typ { background: var(--akzent); color: var(--akzent-text); border: none; }
 .chip.status-offen { border-color: var(--akzent); color: var(--akzent); }
 .chip.status-erledigt { opacity: 0.6; }
-.chip.status-wartend { border-color: var(--warnung); color: var(--warnung); }
+.chip.status-abgelegt { opacity: 0.6; }
 .chip.status-pruefen, .chip.pruefen { border-color: var(--gefahr); color: var(--gefahr); }
 .chip.klickbar { cursor: pointer; }
+
+/* --- Karten: Swipe-Wrapper + Vorschlag/Aktionen --- */
+.karte-wrapper {
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.karte-hint {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 90px;
+  display: flex;
+  align-items: center;
+  font-size: 1.4rem;
+}
+.karte-hint.links { left: 0; background: var(--akzent); color: var(--akzent-text); justify-content: flex-start; padding-left: 18px; }
+.karte-hint.rechts { right: 0; background: var(--text-schwach); color: var(--bg-erhoeht); justify-content: flex-end; padding-right: 18px; }
+.karte-wrapper .karte {
+  position: relative;
+  transition: transform 0.2s ease;
+  touch-action: pan-y;
+}
+
+.vorschlag-zeile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rand);
+}
+.vorschlag-text { font-size: 0.88rem; color: var(--text-schwach); flex: 1; }
+.btn-uebernehmen {
+  background: var(--akzent);
+  color: var(--akzent-text);
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-andere-aktion {
+  background: none;
+  border: 1px solid var(--rand);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-schwach);
+}
 
 .leer-hinweis, .fehler-hinweis {
   text-align: center;
@@ -295,3 +348,36 @@ nav#tabs button.aktiv { color: var(--akzent); font-weight: 600; }
 #einrichtung h2 { margin-top: 0; }
 #einrichtung p { color: var(--text-schwach); font-size: 0.9rem; }
 #einrichtung .version { margin-top: 24px; font-size: 0.8rem; text-align: center; opacity: 0.7; }
+
+/* --- Aktionen-Menü (Bottom Sheet) --- */
+#aktionen-menu {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+}
+#aktionen-menu[hidden] { display: none; }
+#aktionen-menu-inhalt {
+  background: var(--bg);
+  width: 100%;
+  border-radius: 20px 20px 0 0;
+  padding: 20px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.menu-titel { font-weight: 600; margin-bottom: 12px; }
+.menu-liste { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.menu-liste[hidden] { display: none; }
+.menu-liste button {
+  text-align: left;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--rand);
+  background: var(--bg-erhoeht);
+  font-size: 1rem;
+  cursor: pointer;
+}
+.menu-liste button.gefahr { color: var(--gefahr); border-color: var(--gefahr); }
+#verschieben-liste .feld { margin: 10px 0; }

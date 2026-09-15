@@ -2,8 +2,8 @@
 
 // Bei jeder Änderung an der PWA erhöhen. Der Cache-Name in sw.js zieht mit (gleiche Nummer),
 // damit das Handy die neue Version beim zweiten Start sicher übernimmt.
-const APP_VERSION = '1.4';
-const APP_STAND = '10.09.2026';
+const APP_VERSION = '2.0';
+const APP_STAND = '15.09.2026';
 
 /* ===================== Konfiguration ===================== */
 
@@ -71,7 +71,7 @@ async function warteschlangeEntfernen(id) {
 
 /* ===================== API-Client ===================== */
 
-// Netzfehler: kein Netz oder Server nicht erreichbar -> Notiz wird gepuffert.
+// Netzfehler: kein Netz oder Server nicht erreichbar -> Notiz/Aktion wird gepuffert.
 // Alle anderen Fehler (falsche URL, falscher Schlüssel, Serverfehler) werden angezeigt.
 class NetzFehler extends Error {}
 
@@ -106,10 +106,6 @@ async function apiErfassen(text, zeitstempel) {
 
 async function apiListe(filter, wert) {
   return (await apiAufruf({ aktion: 'liste', filter: filter || '', wert: wert || '' })).eintraege;
-}
-
-async function apiAendern(id, felder) {
-  return (await apiAufruf({ aktion: 'aendern', id, felder })).eintrag;
 }
 
 async function apiRueckgaengig(ids) {
@@ -277,6 +273,7 @@ function toastZeigen(nachricht, ruecknaehmbareIds) {
       try {
         await apiRueckgaengig(ruecknaehmbareIds);
         cacheEintraegeEntfernen(ruecknaehmbareIds);
+        aktuelleAnsichtAktualisieren();
       } catch (e) { /* ignorieren */ }
     }
   };
@@ -286,12 +283,33 @@ function toastZeigen(nachricht, ruecknaehmbareIds) {
   toastTimer = setTimeout(() => toast.classList.remove('sichtbar'), 5000);
 }
 
+/* ===================== Datumshilfen ===================== */
+
+function isoDatum(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function heuteIso() { return isoDatum(new Date()); }
+function wocheEndeIso() { const d = new Date(); d.setDate(d.getDate() + 6); return isoDatum(d); }
+
+const WOCHENTAGE_KURZ = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+function formatDatumKurz(isoText) {
+  const d = new Date(isoText);
+  if (isNaN(d)) return '';
+  return WOCHENTAGE_KURZ[d.getDay()] + ' ' + String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.';
+}
+function formatDatum(isoText) {
+  if (!isoText) return '';
+  const datum = new Date(isoText);
+  if (isNaN(datum)) return '';
+  return datum.toLocaleDateString('de-DE');
+}
+
 /* ===================== Listen-Zwischenspeicher ===================== */
 // Apps Script braucht pro Aufruf oft 1 bis 4 Sekunden (Containerstart bei Google).
 // Deshalb: zuletzt geladene Liste sofort anzeigen, aktuelle Version im Hintergrund holen.
 
 const CACHE_PRAEFIX = 'notiz_liste_';
-const CACHE_FILTER = ['heute_offen', 'pruefen', 'person', 'projekt'];
+const CACHE_FILTER = ['eingang', 'heute', 'woche', 'person', 'projekt'];
 
 function cacheSchluessel(filter, wert) {
   return CACHE_PRAEFIX + filter + (wert ? ':' + wert.toLowerCase() : '');
@@ -314,41 +332,41 @@ function cacheSchreiben(filter, wert, eintraege) {
 function cacheAlleAendern(funktion) {
   Object.keys(localStorage).filter((k) => k.startsWith(CACHE_PRAEFIX)).forEach((schluessel) => {
     try {
-      const filter = schluessel.slice(CACHE_PRAEFIX.length).split(':')[0];
-      const neu = funktion(JSON.parse(localStorage.getItem(schluessel)) || [], filter);
+      const rest = schluessel.slice(CACHE_PRAEFIX.length);
+      const teile = rest.split(':');
+      const filter = teile[0];
+      const wert = teile.length > 1 ? teile.slice(1).join(':') : '';
+      const neu = funktion(JSON.parse(localStorage.getItem(schluessel)) || [], filter, wert);
       localStorage.setItem(schluessel, JSON.stringify(neu));
     } catch (e) { localStorage.removeItem(schluessel); }
   });
 }
 
-function istPruefen(e) { return e['Prüfen'] === true || e.Status === 'prüfen'; }
-
-function heuteIso() {
-  const d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+// Spiegelt die serverseitige Filterlogik aus Liste.js, für optimistische Updates im Cache.
+function eintragPasstZuFilter_(eintrag, filter, wert) {
+  const aktiv = eintrag.Status !== 'abgelegt' && eintrag.Status !== 'erledigt';
+  const datum = String(eintrag.Datum || '').substring(0, 10);
+  if (filter === 'eingang') return eintrag.Eingang === 'ja';
+  if (filter === 'heute') return aktiv && datum === heuteIso();
+  if (filter === 'woche') return aktiv && datum && datum >= heuteIso() && datum <= wocheEndeIso();
+  if (filter === 'person') return (eintrag.Person || '').toLowerCase() === (wert || '').toLowerCase();
+  if (filter === 'projekt') return (eintrag.Projekt || '').toLowerCase() === (wert || '').toLowerCase();
+  return true;
 }
 
 // Neue Einträge (gerade gespeichert) vorne in die passenden Listen einfügen.
 function cacheNeueEintraege(eintraege) {
-  cacheAlleAendern((liste, filter) => {
-    const passend = eintraege.filter((e) => {
-      if (filter === 'heute_offen') return true;
-      if (filter === 'pruefen') return istPruefen(e);
-      return false; // Personen-/Projektfilter werden beim nächsten Anzeigen ohnehin aktualisiert
-    });
+  cacheAlleAendern((liste, filter, wert) => {
+    const passend = eintraege.filter((e) => eintragPasstZuFilter_(e, filter, wert));
     return passend.concat(liste);
   });
 }
 
 // Geänderten Eintrag in allen Listen ersetzen bzw. entfernen, wenn er nicht mehr passt.
 function cacheEintragAktualisieren(eintrag) {
-  const heute = heuteIso();
-  cacheAlleAendern((liste, filter) => {
+  cacheAlleAendern((liste, filter, wert) => {
     const ohne = liste.filter((e) => e.ID !== eintrag.ID);
-    const passt = filter === 'pruefen' ? istPruefen(eintrag)
-      : filter === 'heute_offen' ? (eintrag.Status === 'offen' || String(eintrag.Erstellt || '').substring(0, 10) === heute)
-      : true;
-    if (!passt) return ohne;
+    if (!eintragPasstZuFilter_(eintrag, filter, wert)) return ohne;
     const index = liste.findIndex((e) => e.ID === eintrag.ID);
     if (index === -1) return [eintrag].concat(ohne);
     liste[index] = eintrag;
@@ -360,16 +378,20 @@ function cacheEintraegeEntfernen(ids) {
   cacheAlleAendern((liste) => liste.filter((e) => ids.indexOf(e.ID) === -1));
 }
 
-// Beim Start die beiden Tab-Listen im Hintergrund holen, damit sie beim Antippen schon da sind.
+// Beim Start die drei Dashboard-Listen im Hintergrund holen, damit sie beim Antippen schon da sind.
 async function listenVorladen() {
   const { url, schluessel } = konfigLaden();
   if (!url || !schluessel || !navigator.onLine) return;
-  for (const filter of ['heute_offen', 'pruefen']) {
+  for (const filter of ['eingang', 'heute', 'woche']) {
     try { cacheSchreiben(filter, '', await apiListe(filter)); } catch (e) { break; }
   }
 }
 
 /* ===================== Ansichten / Navigation ===================== */
+
+// Zeigt, welche Liste zuletzt geladen wurde - für den Refresh nach einer Aktion
+// und für die Rückkehr aus dem Bearbeiten-Formular.
+let aktiveListenAnsicht = null;
 
 function ansichtZeigen(name) {
   document.querySelectorAll('.ansicht').forEach((el) => {
@@ -379,17 +401,23 @@ function ansichtZeigen(name) {
     btn.classList.toggle('aktiv', btn.dataset.ziel === name);
   });
 
-  if (name === 'liste') {
-    listeFilterLeisteVerstecken();
-    listeLaden('liste-inhalt', 'heute_offen');
-  } else if (name === 'pruefen') {
-    listeLaden('pruefen-inhalt', 'pruefen');
-  } else if (name === 'suche') {
-    document.getElementById('suche-inhalt').innerHTML = '';
+  if (name === 'eingang') listeLaden('eingang-inhalt', 'eingang');
+  else if (name === 'heute') listeLaden('heute-inhalt', 'heute');
+  else if (name === 'woche') listeLaden('woche-inhalt', 'woche');
+  else if (name === 'suche') {
+    const wert = document.getElementById('suche-eingabe').value.trim();
+    if (wert) listeLaden('suche-inhalt', 'suche', wert);
   }
+  // 'liste' (Person/Projekt-Filter) lädt nicht automatisch - siehe
+  // nachPersonOderProjektFiltern() und die Rückkehr aus dem Bearbeiten-Formular.
+}
+
+function aktuelleAnsichtAktualisieren() {
+  if (aktiveListenAnsicht) listeLaden(aktiveListenAnsicht.containerId, aktiveListenAnsicht.filter, aktiveListenAnsicht.wert);
 }
 
 async function listeLaden(containerId, filter, wert) {
+  aktiveListenAnsicht = { containerId, filter, wert };
   const container = document.getElementById(containerId);
   const anfrage = String(Date.now()) + Math.random();
   container.dataset.anfrage = anfrage; // nur die jüngste Anfrage darf rendern
@@ -433,16 +461,22 @@ function nachPersonOderProjektFiltern(art, name) {
 
 document.getElementById('liste-filter-loeschen').addEventListener('click', () => {
   listeFilterLeisteVerstecken();
-  listeLaden('liste-inhalt', 'heute_offen');
+  ansichtZeigen('eingang');
 });
 
-const STATUS_KLASSE = { offen: 'status-offen', erledigt: 'status-erledigt', wartend: 'status-wartend', 'prüfen': 'status-pruefen' };
+const STATUS_KLASSE = {
+  offen: 'status-offen', erledigt: 'status-erledigt', abgelegt: 'status-abgelegt',
+  wartend: 'status-abgelegt', 'prüfen': 'status-pruefen'
+};
 
-function formatDatum(isoText) {
-  if (!isoText) return '';
-  const datum = new Date(isoText);
-  if (isNaN(datum)) return '';
-  return datum.toLocaleDateString('de-DE');
+function vorschlagText(eintrag) {
+  const datumTeil = eintrag.Datum ? formatDatumKurz(eintrag.Datum) : '';
+  if (eintrag.Aktion_Vorschlag === 'Aufgabe') return 'Aufgabe' + (datumTeil ? ' bis ' + datumTeil : '');
+  if (eintrag.Aktion_Vorschlag === 'Termin') {
+    return 'Termin' + (datumTeil ? ' am ' + datumTeil : '') + (eintrag.Uhrzeit ? ', ' + eintrag.Uhrzeit + ' Uhr' : '');
+  }
+  if (eintrag.Aktion_Vorschlag === 'Ablegen') return 'Ablegen vorgeschlagen (nur Info)';
+  return 'Keine Empfehlung – bitte Aktion wählen';
 }
 
 function eintraegeRendern(eintraege, container) {
@@ -451,70 +485,244 @@ function eintraegeRendern(eintraege, container) {
     container.innerHTML = '<p class="leer-hinweis">Keine Einträge.</p>';
     return;
   }
+  eintraege.forEach((eintrag) => container.appendChild(karteErstellen(eintrag)));
+}
 
-  eintraege.forEach((eintrag) => {
-    const karte = document.createElement('div');
-    karte.className = 'karte';
+function karteErstellen(eintrag) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'karte-wrapper';
 
-    const zeile1 = document.createElement('div');
-    zeile1.className = 'zeile1';
-    const titel = document.createElement('span');
-    titel.className = 'titel';
-    titel.textContent = eintrag.Titel || '(ohne Titel)';
-    const datum = document.createElement('span');
-    datum.className = 'datum';
-    datum.textContent = formatDatum(eintrag.Datum) || formatDatum(eintrag.Erstellt);
-    zeile1.append(titel, datum);
-    karte.appendChild(zeile1);
+  const hintLinks = document.createElement('div');
+  hintLinks.className = 'karte-hint links';
+  hintLinks.textContent = eintrag.Eingang === 'ja' ? '✅' : '✓';
+  const hintRechts = document.createElement('div');
+  hintRechts.className = 'karte-hint rechts';
+  hintRechts.textContent = '⋯';
+  wrapper.append(hintLinks, hintRechts);
 
-    if (eintrag.Kurzfassung) {
-      const kurz = document.createElement('div');
-      kurz.className = 'kurzfassung';
-      kurz.textContent = eintrag.Kurzfassung;
-      karte.appendChild(kurz);
+  const karte = document.createElement('div');
+  karte.className = 'karte';
+
+  const zeile1 = document.createElement('div');
+  zeile1.className = 'zeile1';
+  const titel = document.createElement('span');
+  titel.className = 'titel';
+  titel.textContent = eintrag.Titel || '(ohne Titel)';
+  const datum = document.createElement('span');
+  datum.className = 'datum';
+  datum.textContent = formatDatum(eintrag.Datum) || formatDatum(eintrag.Erstellt);
+  zeile1.append(titel, datum);
+  karte.appendChild(zeile1);
+
+  if (eintrag.Kurzfassung) {
+    const kurz = document.createElement('div');
+    kurz.className = 'kurzfassung';
+    kurz.textContent = eintrag.Kurzfassung;
+    karte.appendChild(kurz);
+  }
+
+  const chips = document.createElement('div');
+  chips.className = 'chip-reihe';
+
+  const typChip = document.createElement('span');
+  typChip.className = 'chip typ';
+  typChip.textContent = eintrag.Typ;
+  chips.appendChild(typChip);
+
+  const statusChip = document.createElement('span');
+  statusChip.className = 'chip ' + (STATUS_KLASSE[eintrag.Status] || '');
+  statusChip.textContent = eintrag.Status;
+  chips.appendChild(statusChip);
+
+  if (eintrag['Prüfen'] === true) {
+    const pruefenChip = document.createElement('span');
+    pruefenChip.className = 'chip pruefen';
+    pruefenChip.textContent = 'prüfen';
+    chips.appendChild(pruefenChip);
+  }
+
+  if (eintrag.Person) {
+    const personChip = document.createElement('span');
+    personChip.className = 'chip klickbar';
+    personChip.textContent = '👤 ' + eintrag.Person;
+    personChip.addEventListener('click', (ev) => { ev.stopPropagation(); nachPersonOderProjektFiltern('person', eintrag.Person); });
+    chips.appendChild(personChip);
+  }
+
+  if (eintrag.Projekt) {
+    const projektChip = document.createElement('span');
+    projektChip.className = 'chip klickbar';
+    projektChip.textContent = '🏗 ' + eintrag.Projekt;
+    projektChip.addEventListener('click', (ev) => { ev.stopPropagation(); nachPersonOderProjektFiltern('projekt', eintrag.Projekt); });
+    chips.appendChild(projektChip);
+  }
+
+  karte.appendChild(chips);
+
+  const vorschlagZeile = document.createElement('div');
+  vorschlagZeile.className = 'vorschlag-zeile';
+  if (eintrag.Eingang === 'ja') {
+    const text = document.createElement('span');
+    text.className = 'vorschlag-text';
+    text.textContent = vorschlagText(eintrag);
+    const uebernehmenBtn = document.createElement('button');
+    uebernehmenBtn.type = 'button';
+    uebernehmenBtn.className = 'btn-uebernehmen';
+    uebernehmenBtn.textContent = 'Übernehmen';
+    uebernehmenBtn.addEventListener('click', (ev) => { ev.stopPropagation(); aktionAusfuehren('uebernehmen', eintrag); });
+    const andereBtn = document.createElement('button');
+    andereBtn.type = 'button';
+    andereBtn.className = 'btn-andere-aktion';
+    andereBtn.textContent = 'Andere Aktion';
+    andereBtn.addEventListener('click', (ev) => { ev.stopPropagation(); aktionenMenuOeffnen(eintrag); });
+    vorschlagZeile.append(text, uebernehmenBtn, andereBtn);
+  } else {
+    const andereBtn = document.createElement('button');
+    andereBtn.type = 'button';
+    andereBtn.className = 'btn-andere-aktion';
+    andereBtn.textContent = '⋯ Aktion';
+    andereBtn.addEventListener('click', (ev) => { ev.stopPropagation(); aktionenMenuOeffnen(eintrag); });
+    vorschlagZeile.appendChild(andereBtn);
+  }
+  karte.appendChild(vorschlagZeile);
+
+  karte.addEventListener('click', () => bearbeitenOeffnen(eintrag));
+  wrapper.appendChild(karte);
+  swipeAktivieren(karte, eintrag);
+
+  return wrapper;
+}
+
+/* ===================== Wischgesten (Handy) ===================== */
+// Rechts wischen: Übernehmen (falls im Eingang) bzw. schnell Erledigt.
+// Links wischen: Aktionen-Menü öffnen. Buttons bleiben immer zusätzlich nutzbar (PC-Fallback).
+
+function swipeAktivieren(karte, eintrag) {
+  const schwelle = 70;
+  let startX = null, startY = null, deltaX = 0, aktiv = false;
+
+  karte.addEventListener('touchstart', (ev) => {
+    if (ev.touches.length !== 1) return;
+    startX = ev.touches[0].clientX;
+    startY = ev.touches[0].clientY;
+    deltaX = 0;
+    aktiv = false;
+  }, { passive: true });
+
+  karte.addEventListener('touchmove', (ev) => {
+    if (startX === null) return;
+    const dx = ev.touches[0].clientX - startX;
+    const dy = ev.touches[0].clientY - startY;
+    if (!aktiv && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) aktiv = true;
+    if (!aktiv) return;
+    deltaX = dx;
+    karte.style.transition = 'none';
+    karte.style.transform = 'translateX(' + dx + 'px)';
+  }, { passive: true });
+
+  karte.addEventListener('touchend', () => {
+    karte.style.transition = '';
+    karte.style.transform = '';
+    if (!aktiv) { startX = null; return; }
+    if (deltaX > schwelle) {
+      aktionAusfuehren(eintrag.Eingang === 'ja' ? 'uebernehmen' : 'erledigt', eintrag);
+    } else if (deltaX < -schwelle) {
+      aktionenMenuOeffnen(eintrag);
     }
-
-    const chips = document.createElement('div');
-    chips.className = 'chip-reihe';
-
-    const typChip = document.createElement('span');
-    typChip.className = 'chip typ';
-    typChip.textContent = eintrag.Typ;
-    chips.appendChild(typChip);
-
-    const statusChip = document.createElement('span');
-    statusChip.className = 'chip ' + (STATUS_KLASSE[eintrag.Status] || '');
-    statusChip.textContent = eintrag.Status;
-    chips.appendChild(statusChip);
-
-    if (eintrag['Prüfen'] === true) {
-      const pruefenChip = document.createElement('span');
-      pruefenChip.className = 'chip pruefen';
-      pruefenChip.textContent = 'prüfen';
-      chips.appendChild(pruefenChip);
-    }
-
-    if (eintrag.Person) {
-      const personChip = document.createElement('span');
-      personChip.className = 'chip klickbar';
-      personChip.textContent = '👤 ' + eintrag.Person;
-      personChip.addEventListener('click', (ev) => { ev.stopPropagation(); nachPersonOderProjektFiltern('person', eintrag.Person); });
-      chips.appendChild(personChip);
-    }
-
-    if (eintrag.Projekt) {
-      const projektChip = document.createElement('span');
-      projektChip.className = 'chip klickbar';
-      projektChip.textContent = '🏗 ' + eintrag.Projekt;
-      projektChip.addEventListener('click', (ev) => { ev.stopPropagation(); nachPersonOderProjektFiltern('projekt', eintrag.Projekt); });
-      chips.appendChild(projektChip);
-    }
-
-    karte.appendChild(chips);
-    karte.addEventListener('click', () => bearbeitenOeffnen(eintrag));
-    container.appendChild(karte);
+    startX = null; deltaX = 0; aktiv = false;
   });
 }
+
+/* ===================== Aktionen (uebernehmen/aufgabe/termin/verschieben/ablegen/erledigt/loeschen) ===================== */
+
+async function aktionAusfuehren(aktion, eintrag, extra) {
+  try {
+    if (aktion === 'loeschen') {
+      await apiAufruf({ aktion: 'loeschen', id: eintrag.ID });
+      cacheEintraegeEntfernen([eintrag.ID]);
+      toastZeigen('Gelöscht', null);
+      aktuelleAnsichtAktualisieren();
+      return;
+    }
+
+    const daten = { aktion, id: eintrag.ID };
+    if (aktion === 'aufgabe' || aktion === 'termin') daten.felder = extra || {};
+    if (aktion === 'verschieben') daten.datum = extra.datum;
+
+    const antwort = await apiAufruf(daten);
+    cacheEintragAktualisieren(antwort.eintrag);
+    aktuelleAnsichtAktualisieren();
+  } catch (fehler) {
+    toastZeigen(fehler instanceof NetzFehler ? 'Keine Verbindung – bitte erneut versuchen' : 'Fehler: ' + fehler.message, null);
+  }
+}
+
+/* ===================== Aktionen-Menü (Bottom Sheet) ===================== */
+
+let aktuellesMenuEintrag = null;
+
+function aktionenMenuOeffnen(eintrag) {
+  aktuellesMenuEintrag = eintrag;
+  document.getElementById('aktionen-menu-titel').textContent = eintrag.Titel || '(ohne Titel)';
+  document.getElementById('aktionen-menu-liste').hidden = false;
+  document.getElementById('verschieben-liste').hidden = true;
+  document.getElementById('aktionen-menu').hidden = false;
+}
+
+function aktionenMenuSchliessen() {
+  document.getElementById('aktionen-menu').hidden = true;
+  aktuellesMenuEintrag = null;
+}
+
+document.getElementById('aktionen-menu-schliessen').addEventListener('click', aktionenMenuSchliessen);
+document.getElementById('aktionen-menu').addEventListener('click', (ev) => {
+  if (ev.target.id === 'aktionen-menu') aktionenMenuSchliessen();
+});
+
+document.getElementById('aktionen-menu-liste').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button[data-aktion]');
+  if (!btn || !aktuellesMenuEintrag) return;
+  const aktion = btn.dataset.aktion;
+  const eintrag = aktuellesMenuEintrag;
+
+  if (aktion === 'verschieben-oeffnen') {
+    document.getElementById('aktionen-menu-liste').hidden = true;
+    document.getElementById('verschieben-liste').hidden = false;
+    document.getElementById('verschieben-datum').value = '';
+    return;
+  }
+  if (aktion === 'bearbeiten') {
+    aktionenMenuSchliessen();
+    bearbeitenOeffnen(eintrag);
+    return;
+  }
+  if (aktion === 'loeschen') {
+    if (!confirm('"' + (eintrag.Titel || 'Eintrag') + '" wirklich löschen?')) return;
+    aktionenMenuSchliessen();
+    await aktionAusfuehren('loeschen', eintrag);
+    return;
+  }
+  aktionenMenuSchliessen();
+  await aktionAusfuehren(aktion, eintrag);
+});
+
+document.getElementById('verschieben-liste').addEventListener('click', async (ev) => {
+  const tage = ev.target.dataset.verschieben;
+  if (!tage || !aktuellesMenuEintrag) return;
+  const ziel = new Date();
+  ziel.setDate(ziel.getDate() + Number(tage));
+  const eintrag = aktuellesMenuEintrag;
+  aktionenMenuSchliessen();
+  await aktionAusfuehren('verschieben', eintrag, { datum: isoDatum(ziel) });
+});
+
+document.getElementById('verschieben-bestaetigen').addEventListener('click', async () => {
+  const datum = document.getElementById('verschieben-datum').value;
+  if (!datum || !aktuellesMenuEintrag) return;
+  const eintrag = aktuellesMenuEintrag;
+  aktionenMenuSchliessen();
+  await aktionAusfuehren('verschieben', eintrag, { datum });
+});
 
 /* ===================== Suche ===================== */
 
@@ -529,13 +737,18 @@ document.getElementById('suche-eingabe').addEventListener('input', (ev) => {
 /* ===================== Bearbeiten ===================== */
 
 let bearbeitenAktuelleId = null;
+let bearbeitenHerkunft = 'eingang';
 
 function bearbeitenOeffnen(eintrag) {
   bearbeitenAktuelleId = eintrag.ID;
+  const sichtbar = document.querySelector('.ansicht:not([hidden])');
+  bearbeitenHerkunft = sichtbar ? sichtbar.dataset.ansicht : 'eingang';
+
   document.getElementById('b-titel').value = eintrag.Titel || '';
   document.getElementById('b-status').value = eintrag.Status || 'offen';
   document.getElementById('b-typ').value = eintrag.Typ || 'Notiz';
   document.getElementById('b-datum').value = (eintrag.Datum || '').substring(0, 10);
+  document.getElementById('b-uhrzeit').value = eintrag.Uhrzeit || '';
   document.getElementById('b-erinnerung').value = (eintrag.Erinnerungsdatum || '').substring(0, 10);
   document.getElementById('b-person').value = eintrag.Person || '';
   document.getElementById('b-projekt').value = eintrag.Projekt || '';
@@ -543,7 +756,12 @@ function bearbeitenOeffnen(eintrag) {
   ansichtZeigen('bearbeiten');
 }
 
-document.getElementById('bearbeiten-abbrechen').addEventListener('click', () => ansichtZeigen('liste'));
+function bearbeitenSchliessenUndZurueck() {
+  ansichtZeigen(bearbeitenHerkunft);
+  if (bearbeitenHerkunft === 'liste') aktuelleAnsichtAktualisieren();
+}
+
+document.getElementById('bearbeiten-abbrechen').addEventListener('click', bearbeitenSchliessenUndZurueck);
 
 document.getElementById('bearbeiten-formular').addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -552,6 +770,7 @@ document.getElementById('bearbeiten-formular').addEventListener('submit', async 
     Status: document.getElementById('b-status').value,
     Typ: document.getElementById('b-typ').value,
     Datum: document.getElementById('b-datum').value,
+    Uhrzeit: document.getElementById('b-uhrzeit').value,
     Erinnerungsdatum: document.getElementById('b-erinnerung').value,
     Person: document.getElementById('b-person').value.trim(),
     Projekt: document.getElementById('b-projekt').value.trim(),
@@ -559,9 +778,9 @@ document.getElementById('bearbeiten-formular').addEventListener('submit', async 
     'Prüfen': false // wurde gerade vom Nutzer durchgesehen
   };
   try {
-    const eintrag = await apiAendern(bearbeitenAktuelleId, felder);
-    cacheEintragAktualisieren(eintrag);
-    ansichtZeigen('liste');
+    const antwort = await apiAufruf({ aktion: 'bearbeiten', id: bearbeitenAktuelleId, felder });
+    cacheEintragAktualisieren(antwort.eintrag);
+    bearbeitenSchliessenUndZurueck();
   } catch (fehler) {
     alert('Speichern fehlgeschlagen: ' + fehler.message);
   }

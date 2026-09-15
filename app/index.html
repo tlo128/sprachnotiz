@@ -52,6 +52,18 @@
       <button id="fertig-btn">Fertig</button>
     </section>
 
+    <section class="ansicht" id="ansicht-eingang" data-ansicht="eingang" hidden>
+      <div class="karten-liste" id="eingang-inhalt"></div>
+    </section>
+
+    <section class="ansicht" id="ansicht-heute" data-ansicht="heute" hidden>
+      <div class="karten-liste" id="heute-inhalt"></div>
+    </section>
+
+    <section class="ansicht" id="ansicht-woche" data-ansicht="woche" hidden>
+      <div class="karten-liste" id="woche-inhalt"></div>
+    </section>
+
     <section class="ansicht" id="ansicht-liste" data-ansicht="liste" hidden>
       <div class="chip-reihe" id="liste-filter-leiste" hidden>
         <span class="chip" id="liste-filter-text"></span>
@@ -65,10 +77,6 @@
       <div class="karten-liste" id="suche-inhalt"></div>
     </section>
 
-    <section class="ansicht" id="ansicht-pruefen" data-ansicht="pruefen" hidden>
-      <div class="karten-liste" id="pruefen-inhalt"></div>
-    </section>
-
     <section class="ansicht" id="ansicht-bearbeiten" data-ansicht="bearbeiten" hidden>
       <form id="bearbeiten-formular">
         <div class="feld">
@@ -80,7 +88,7 @@
           <select id="b-status">
             <option value="offen">offen</option>
             <option value="erledigt">erledigt</option>
-            <option value="wartend">wartend</option>
+            <option value="abgelegt">abgelegt</option>
             <option value="prüfen">prüfen</option>
           </select>
         </div>
@@ -88,6 +96,7 @@
           <label for="b-typ">Typ</label>
           <select id="b-typ">
             <option value="Aufgabe">Aufgabe</option>
+            <option value="Termin">Termin</option>
             <option value="Notiz">Notiz</option>
             <option value="Entscheidung">Entscheidung</option>
             <option value="Kontakt">Kontakt</option>
@@ -96,6 +105,10 @@
         <div class="feld">
           <label for="b-datum">Datum</label>
           <input id="b-datum" type="date">
+        </div>
+        <div class="feld">
+          <label for="b-uhrzeit">Uhrzeit</label>
+          <input id="b-uhrzeit" type="time">
         </div>
         <div class="feld">
           <label for="b-erinnerung">Erinnerungsdatum</label>
@@ -128,10 +141,36 @@
 
   <nav id="tabs">
     <button data-ziel="start" class="aktiv"><span class="symbol">🎙️</span>Neu</button>
-    <button data-ziel="liste"><span class="symbol">📋</span>Liste</button>
+    <button data-ziel="eingang"><span class="symbol">📥</span>Eingang</button>
+    <button data-ziel="heute"><span class="symbol">📅</span>Heute</button>
+    <button data-ziel="woche"><span class="symbol">🗓️</span>Woche</button>
     <button data-ziel="suche"><span class="symbol">🔍</span>Suche</button>
-    <button data-ziel="pruefen"><span class="symbol">⚠️</span>Prüfen</button>
   </nav>
+</div>
+
+<div id="aktionen-menu" hidden>
+  <div id="aktionen-menu-inhalt">
+    <div class="menu-titel" id="aktionen-menu-titel"></div>
+    <div class="menu-liste" id="aktionen-menu-liste">
+      <button type="button" data-aktion="aufgabe">📋 Als Aufgabe</button>
+      <button type="button" data-aktion="termin">📅 Als Termin</button>
+      <button type="button" data-aktion="verschieben-oeffnen">↪️ Verschieben</button>
+      <button type="button" data-aktion="ablegen">🗄️ Ablegen</button>
+      <button type="button" data-aktion="erledigt">✅ Erledigt</button>
+      <button type="button" data-aktion="bearbeiten">✏️ Bearbeiten</button>
+      <button type="button" data-aktion="loeschen" class="gefahr">🗑️ Löschen</button>
+    </div>
+    <div class="menu-liste" id="verschieben-liste" hidden>
+      <button type="button" data-verschieben="1">+1 Tag</button>
+      <button type="button" data-verschieben="7">Nächste Woche</button>
+      <div class="feld">
+        <label for="verschieben-datum">Datum wählen</label>
+        <input id="verschieben-datum" type="date">
+      </div>
+      <button type="button" class="btn primaer" id="verschieben-bestaetigen">Übernehmen</button>
+    </div>
+    <button type="button" class="btn" id="aktionen-menu-schliessen">Abbrechen</button>
+  </div>
 </div>
 
 <script src="app.js"></script>

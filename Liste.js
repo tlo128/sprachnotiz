@@ -4,14 +4,21 @@ function listeAbrufen_(filter, wert) {
   var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
   var alle = alleZeilenAlsObjekte_(notizen);
   var heute = Utilities.formatDate(new Date(), 'Europe/Berlin', 'yyyy-MM-dd');
+  var wocheEnde = Utilities.formatDate(new Date(Date.now() + 6 * 24 * 60 * 60 * 1000), 'Europe/Berlin', 'yyyy-MM-dd');
   var gefiltert;
 
   switch (filter) {
-    case 'offen':
-      gefiltert = alle.filter(function (e) { return e.Status === 'offen'; });
+    case 'eingang':
+      gefiltert = alle.filter(function (e) { return e.Eingang === 'ja'; });
       break;
-    case 'pruefen':
-      gefiltert = alle.filter(function (e) { return e['Prüfen'] === true || e.Status === 'prüfen'; });
+    case 'heute':
+      gefiltert = alle.filter(function (e) { return aktivesDatum_(e) && String(e.Datum || '').substring(0, 10) === heute; });
+      break;
+    case 'woche':
+      gefiltert = alle.filter(function (e) {
+        var d = String(e.Datum || '').substring(0, 10);
+        return aktivesDatum_(e) && d && d >= heute && d <= wocheEnde;
+      });
       break;
     case 'person':
       gefiltert = alle.filter(function (e) { return gleich_(e.Person, wert); });
@@ -28,18 +35,25 @@ function listeAbrufen_(filter, wert) {
       });
       break;
     case 'alle':
-      gefiltert = alle;
-      break;
-    case 'heute_offen':
     default:
-      gefiltert = alle.filter(function (e) {
-        var erstelltDatum = e.Erstellt ? String(e.Erstellt).substring(0, 10) : '';
-        return erstelltDatum === heute || e.Status === 'offen';
-      });
+      gefiltert = alle;
   }
 
-  gefiltert.sort(function (a, b) { return new Date(b.Erstellt) - new Date(a.Erstellt); });
+  if (filter === 'heute' || filter === 'woche') {
+    gefiltert.sort(function (a, b) {
+      var da = String(a.Datum || '').substring(0, 10) + ' ' + (a.Uhrzeit || '00:00');
+      var db = String(b.Datum || '').substring(0, 10) + ' ' + (b.Uhrzeit || '00:00');
+      return da < db ? -1 : da > db ? 1 : 0;
+    });
+  } else {
+    gefiltert.sort(function (a, b) { return new Date(b.Erstellt) - new Date(a.Erstellt); });
+  }
   return gefiltert;
+}
+
+// Abgelegtes und Erledigtes taucht nur noch in der Suche auf, nicht unter Heute/Woche.
+function aktivesDatum_(e) {
+  return e.Status !== 'abgelegt' && e.Status !== 'erledigt';
 }
 
 function gleich_(wert, gesucht) {
