@@ -4,15 +4,22 @@ var SHEET_NOTIZEN = 'Notizen';
 var SHEET_PERSONEN = 'Personen';
 var SHEET_PROJEKTE = 'Projekte';
 
+// Kernfelder (Position 1-8, unverändert seit Session 1) + Zusatzfelder.
+// Reihenfolge ist bewusst genau so wie in CLAUDE.md dokumentiert - notizenDatenmodellMigrieren_
+// in SheetSetup.js fügt neue Spalten an der jeweils richtigen Stelle ein, statt sie ans Ende
+// zu hängen, damit bestehende Daten nicht unter falschen Überschriften landen.
 var SPALTEN_NOTIZEN = [
-  'ID', 'Titel', 'Datum', 'Status', 'Erinnerungsdatum', 'Person', 'Projekt',
-  'Typ', 'Kurzfassung', 'Originaltext', 'Confidence', 'Prüfen', 'Erstellt'
+  'ID', 'Titel', 'Datum', 'Status', 'Erinnerungsdatum', 'Person', 'Projekt', 'Typ',
+  'Uhrzeit', 'Kurzfassung', 'Originaltext', 'Confidence', 'Prüfen',
+  'Eingang', 'Aktion_Vorschlag', 'Outlook_ID', 'Outlook_Typ', 'Outlook_Geaendert',
+  'Erstellt', 'Geaendert'
 ];
 
 var SPALTEN_NAMENSLISTE = ['Name', 'Schreibvarianten', 'Zuletzt'];
 
-var STATUS_WERTE = ['offen', 'erledigt', 'wartend', 'prüfen'];
-var TYP_WERTE = ['Aufgabe', 'Notiz', 'Entscheidung', 'Kontakt'];
+var STATUS_WERTE = ['offen', 'erledigt', 'abgelegt', 'prüfen'];
+var TYP_WERTE = ['Aufgabe', 'Termin', 'Notiz', 'Entscheidung', 'Kontakt'];
+var AKTION_VORSCHLAG_WERTE = ['Aufgabe', 'Termin', 'Ablegen'];
 
 var MODELL_HAIKU = 'claude-haiku-4-5';
 var MODELL_SONNET = 'claude-sonnet-5';

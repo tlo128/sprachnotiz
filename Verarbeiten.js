@@ -17,6 +17,12 @@ function datumAusText_(text) {
   return new Date(Number(teile[1]), Number(teile[2]) - 1, Number(teile[3]));
 }
 
+function uhrzeitAusText_(text) {
+  if (!text) return '';
+  var passt = String(text).trim().match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return passt ? passt[0] : '';
+}
+
 /**
  * Verarbeitet eine Sprachnotiz: ruft Claude auf, gleicht Namen ab und schreibt
  * die resultierenden Zeilen ins Blatt "Notizen".
@@ -99,11 +105,18 @@ function schreibeEintragZeile_(notizen, personen, projekte, eintrag, originaltex
     Person: person ? person.kanonisch : '',
     Projekt: projekt ? projekt.kanonisch : '',
     Typ: TYP_WERTE.indexOf(eintrag.typ) !== -1 ? eintrag.typ : 'Notiz',
+    Uhrzeit: uhrzeitAusText_(eintrag.uhrzeit),
     Kurzfassung: eintrag.kurzfassung,
     Originaltext: originaltext,
     Confidence: eintrag.confidence,
     'Prüfen': muessenPruefen,
-    Erstellt: jetzt
+    Eingang: 'ja',
+    Aktion_Vorschlag: AKTION_VORSCHLAG_WERTE.indexOf(eintrag.empfohlene_aktion) !== -1 ? eintrag.empfohlene_aktion : '',
+    Outlook_ID: '',
+    Outlook_Typ: '',
+    Outlook_Geaendert: '',
+    Erstellt: jetzt,
+    Geaendert: jetzt
   };
 
   notizen.appendRow(SPALTEN_NOTIZEN.map(function (spalte) { return zeile[spalte]; }));
@@ -120,11 +133,18 @@ function schreibeRohtextZeile_(notizen, originaltext, jetzt) {
     Person: '',
     Projekt: '',
     Typ: 'Notiz',
+    Uhrzeit: '',
     Kurzfassung: '',
     Originaltext: originaltext,
     Confidence: 0,
     'Prüfen': true,
-    Erstellt: jetzt
+    Eingang: 'ja',
+    Aktion_Vorschlag: '',
+    Outlook_ID: '',
+    Outlook_Typ: '',
+    Outlook_Geaendert: '',
+    Erstellt: jetzt,
+    Geaendert: jetzt
   };
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);

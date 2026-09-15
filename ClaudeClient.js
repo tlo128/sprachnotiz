@@ -23,6 +23,8 @@ function strukturTool_() {
               person: { type: 'string', description: 'Name der beteiligten Person. Falls eine bekannte Schreibvariante erkannt wird, den kanonischen Namen aus der Liste verwenden. Sonst leerer String.' },
               projekt: { type: 'string', description: 'Name des Projekts/Bauträgers. Falls eine bekannte Schreibvariante erkannt wird, den kanonischen Namen aus der Liste verwenden. Sonst leerer String.' },
               typ: { type: 'string', enum: TYP_WERTE },
+              uhrzeit: { type: 'string', description: 'Uhrzeit im Format HH:MM, falls im Text genannt oder ein Treffen/Termin eindeutig impliziert wird. Sonst leerer String.' },
+              empfohlene_aktion: { type: 'string', enum: AKTION_VORSCHLAG_WERTE, description: 'Aufgabe, wenn noch etwas zu tun ist. Termin, wenn eine Uhrzeit oder ein Treffen genannt wird. Ablegen bei reiner Information oder einer Entscheidung ohne Folgeaufgabe.' },
               kurzfassung: { type: 'string', description: 'Ein bis zwei Sätze Zusammenfassung.' },
               neue_person: { type: 'boolean', description: 'true, falls "person" nicht in der übergebenen Liste bekannter Personen/Schreibvarianten vorkommt.' },
               neues_projekt: { type: 'boolean', description: 'true, falls "projekt" nicht in der übergebenen Liste bekannter Projekte/Schreibvarianten vorkommt.' },
@@ -36,7 +38,7 @@ function strukturTool_() {
               },
               confidence: { type: 'number', description: 'Zahl zwischen 0 und 1: wie sicher ist die Zuordnung von Feldern, Namen und Datum.' }
             },
-            required: ['titel', 'datum', 'status', 'erinnerungsdatum', 'person', 'projekt', 'typ', 'kurzfassung', 'neue_person', 'neues_projekt', 'person_aliase', 'projekt_aliase', 'confidence']
+            required: ['titel', 'datum', 'status', 'erinnerungsdatum', 'person', 'projekt', 'typ', 'uhrzeit', 'empfohlene_aktion', 'kurzfassung', 'neue_person', 'neues_projekt', 'person_aliase', 'projekt_aliase', 'confidence']
           }
         }
       },
@@ -50,6 +52,7 @@ function systemPrompt_(jetztText, personenListe, projekteListe) {
     'Du strukturierst deutsche Sprachnotizen aus dem Immobilienalltag (Bauträger, Vermietung, Vertrieb) in Einträge für eine Notiz-Datenbank.',
     'Jetzt ist: ' + jetztText + '. Löse relative Datumsangaben ("nächsten Dienstag", "Ende des Monats", "morgen") relativ zu diesem Zeitpunkt auf.',
     'Wenn der Text ausdrücklich zwei Namen/Bezeichnungen derselben Person oder demselben Projekt zuordnet (z.B. "Herr Eckert, auch Alex genannt", "das ist dieselbe wie...", "von der Firma X"), trage die zusätzliche(n) Bezeichnung(en) in person_aliase bzw. projekt_aliase ein, statt sie als eigene Person/eigenes Projekt zu behandeln.',
+    'Setze empfohlene_aktion so: "Aufgabe", wenn noch etwas zu erledigen ist (anrufen, schicken, klären, prüfen ...). "Termin", wenn eine Uhrzeit oder ein Treffen/Termin genannt wird (dann auch uhrzeit füllen). "Ablegen", wenn es sich um reine Information handelt oder um eine Entscheidung/Notiz ohne konkrete Folgeaufgabe.',
     'Bekannte Personen (Name: Schreibvarianten): ' + (personenListe || '(keine)'),
     'Bekannte Projekte (Name: Schreibvarianten): ' + (projekteListe || '(keine)'),
     'Antworte ausschließlich über das Werkzeug ' + STRUKTUR_TOOL_NAME + '.'

@@ -56,3 +56,23 @@ function testAliase() {
 
   Logger.log('Fertig. Bitte im Blatt "Personen" prüfen: Zeile "Herr Eckert" sollte Schreibvarianten "Alex, Inwatec" haben.');
 }
+
+// Testet empfohlene_aktion/uhrzeit: je ein klarer Fall für Aufgabe, Termin, Ablegen.
+// Im Editor ausführen: testAktionsvorschlag()
+function testAktionsvorschlag() {
+  var jetzt = '2026-09-09T10:00:00+02:00';
+
+  var faelle = [
+    { erwartet: 'Aufgabe', satz: 'Ich muss Frau Nguyen noch wegen der Kaution zurückrufen.' },
+    { erwartet: 'Termin', satz: 'Morgen um 14 Uhr Besichtigung mit Herrn Bauer im Lindenpark.' },
+    { erwartet: 'Ablegen', satz: 'Notiz: Der Bauträger hat sich für Fenster von Glasbau Reiter entschieden, das ist final.' }
+  ];
+
+  faelle.forEach(function (fall) {
+    Logger.log('--- Erwartet: %s | Satz: %s', fall.erwartet, fall.satz);
+    verarbeite(fall.satz, jetzt).forEach(function (e) {
+      Logger.log('  -> Aktion_Vorschlag=%s | Uhrzeit=%s | Eingang=%s | Typ=%s',
+        e.Aktion_Vorschlag, e.Uhrzeit, e.Eingang, e.Typ);
+    });
+  });
+}
