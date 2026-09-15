@@ -76,3 +76,31 @@ function testAktionsvorschlag() {
     });
   });
 }
+
+// Testet die Dashboard-Aktionen: uebernehmen, verschieben, erledigt, ablegen, loeschen.
+// Im Editor ausführen: testAktionen()
+function testAktionen() {
+  var jetzt = '2026-09-09T10:00:00+02:00';
+
+  var e1 = verarbeite('Ich muss Frau Nguyen noch wegen der Kaution zurückrufen.', jetzt)[0];
+  Logger.log('Eintrag 1 (ID %s) vor Übernehmen: Eingang=%s Aktion_Vorschlag=%s', e1.ID, e1.Eingang, e1.Aktion_Vorschlag);
+  var e1b = aktionUebernehmen_(e1.ID);
+  Logger.log('  -> nach uebernehmen: Eingang=%s Status=%s Typ=%s (Eingang sollte "nein" sein)', e1b.Eingang, e1b.Status, e1b.Typ);
+
+  var e1c = aktionVerschieben_(e1.ID, '2026-09-20');
+  Logger.log('  -> nach verschieben: Datum=%s (sollte 2026-09-20 sein)', e1c.Datum);
+
+  var e1d = aktionErledigt_(e1.ID);
+  Logger.log('  -> nach erledigt: Status=%s (sollte erledigt sein)', e1d.Status);
+
+  var e2 = verarbeite('Notiz: Der Bauträger hat sich für Fenster von Glasbau Reiter entschieden, das ist final.', jetzt)[0];
+  var e2b = aktionAblegen_(e2.ID);
+  Logger.log('Eintrag 2 (ID %s) nach ablegen: Status=%s Datum=%s Eingang=%s (Status abgelegt, Datum leer, Eingang nein erwartet)',
+    e2.ID, e2b.Status, e2b.Datum, e2b.Eingang);
+
+  aktionLoeschen_(e2.ID);
+  var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
+  Logger.log('Eintrag 2 gelöscht, Zeile jetzt: %s (sollte -1 sein)', findeZeileNachId_(notizen, e2.ID));
+
+  Logger.log('Fertig. Im Ausführungsprotokoll sollten dazwischen auch [Outlook-Stub]-Zeilen für Eintrag 1 auftauchen.');
+}

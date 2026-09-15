@@ -31,8 +31,25 @@ function aktionAusfuehren_(daten) {
   switch (daten.aktion) {
     case 'liste':
       return { ok: true, eintraege: listeAbrufen_(daten.filter, daten.wert) };
-    case 'aendern':
-      return { ok: true, eintrag: eintragAendern_(daten.id, daten.felder) };
+    case 'uebernehmen':
+      return { ok: true, eintrag: aktionUebernehmen_(daten.id) };
+    case 'aufgabe':
+      return { ok: true, eintrag: aktionAufgabe_(daten.id, daten.felder || {}) };
+    case 'termin':
+      return { ok: true, eintrag: aktionTermin_(daten.id, daten.felder || {}) };
+    case 'verschieben':
+      if (!daten.datum) return { ok: false, fehler: 'Kein Datum übergeben.' };
+      return { ok: true, eintrag: aktionVerschieben_(daten.id, daten.datum) };
+    case 'ablegen':
+      return { ok: true, eintrag: aktionAblegen_(daten.id) };
+    case 'erledigt':
+      return { ok: true, eintrag: aktionErledigt_(daten.id) };
+    case 'bearbeiten':
+    case 'aendern': // Alias, solange ältere PWA-Versionen noch "aendern" senden
+      return { ok: true, eintrag: aktionBearbeiten_(daten.id, daten.felder) };
+    case 'loeschen':
+      aktionLoeschen_(daten.id);
+      return { ok: true };
     case 'rueckgaengig':
       eintraegeLoeschen_(daten.ids || [daten.id]);
       return { ok: true };

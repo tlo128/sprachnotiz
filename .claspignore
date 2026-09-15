@@ -1,11 +1,13 @@
 **/**
 !appsscript.json
 !Aendern.js
+!Aktionen.js
 !ClaudeClient.js
 !Code.js
 !Config.js
 !Liste.js
 !Namenslisten.js
+!Outlook.js
 !SheetSetup.js
 !Test.js
 !Verarbeiten.js

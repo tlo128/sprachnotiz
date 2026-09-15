@@ -1,34 +1,5 @@
-// Schreibzugriffe für die PWA: Eintrag ändern, Rückgängig (letzte Einträge löschen).
-
-var AENDERBARE_FELDER = ['Titel', 'Datum', 'Status', 'Erinnerungsdatum', 'Person', 'Projekt', 'Typ', 'Kurzfassung', 'Prüfen'];
-
-function eintragAendern_(id, felder) {
-  var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
-    var zeileNr = findeZeileNachId_(notizen, id);
-    if (zeileNr === -1) throw new Error('Eintrag mit ID ' + id + ' nicht gefunden.');
-
-    Object.keys(felder || {}).forEach(function (feldName) {
-      if (AENDERBARE_FELDER.indexOf(feldName) === -1) return;
-      var spaltenIndex = SPALTEN_NOTIZEN.indexOf(feldName) + 1;
-      var wert = felder[feldName];
-      if (feldName === 'Status' && STATUS_WERTE.indexOf(wert) === -1) return;
-      if (feldName === 'Typ' && TYP_WERTE.indexOf(wert) === -1) return;
-      if (feldName === 'Prüfen') wert = wert === true;
-      if (feldName === 'Datum' || feldName === 'Erinnerungsdatum') {
-        wert = datumAusText_(wert);
-      }
-      notizen.getRange(zeileNr, spaltenIndex).setValue(wert);
-    });
-
-    var neueWerte = notizen.getRange(zeileNr, 1, 1, SPALTEN_NOTIZEN.length).getValues()[0];
-    return zeileZuObjekt_(neueWerte);
-  } finally {
-    lock.releaseLock();
-  }
-}
+// Rückgängig (letzte Einträge löschen) und die von Aktionen.js genutzte Zeilensuche.
+// Das Feld-Setzen selbst (inkl. Whitelist AENDERBARE_FELDER) lebt in Aktionen.js.
 
 function eintraegeLoeschen_(ids) {
   var lock = LockService.getScriptLock();
