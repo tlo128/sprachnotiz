@@ -2,7 +2,7 @@
 
 // Bei jeder Änderung an der PWA erhöhen. Der Cache-Name in sw.js zieht mit (gleiche Nummer),
 // damit das Handy die neue Version beim zweiten Start sicher übernimmt.
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.2';
 const APP_STAND = '15.09.2026';
 
 /* ===================== Konfiguration ===================== */
@@ -447,6 +447,35 @@ async function listenVorladen() {
 // und für die Rückkehr aus dem Bearbeiten-Formular.
 let aktiveListenAnsicht = null;
 
+let letzteAktualisierung = null;
+
+function aktualisierungsHinweisAktualisieren() {
+  const el = document.getElementById('aktualisiert-hinweis');
+  el.textContent = letzteAktualisierung
+    ? 'Aktualisiert ' + letzteAktualisierung.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    : '';
+}
+
+// Manueller "Jetzt aktualisieren"-Knopf: sendet zuerst wartende Notizen/Aktionen,
+// lädt dann nur die gerade sichtbare Liste frisch (nicht alle Tabs - sonst dauert
+// der Knopf bei einer langsamen Apps-Script-Antwort unnötig lange).
+async function jetztAktualisieren() {
+  const btn = document.getElementById('aktualisieren-btn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add('dreht');
+  try {
+    await warteschlangeSynchronisieren();
+    if (aktiveListenAnsicht) {
+      await listeLaden(aktiveListenAnsicht.containerId, aktiveListenAnsicht.filter, aktiveListenAnsicht.wert);
+    }
+    toastZeigen('Aktualisiert', null);
+  } finally {
+    btn.classList.remove('dreht');
+    btn.disabled = false;
+  }
+}
+
 function ansichtZeigen(name) {
   document.querySelectorAll('.ansicht').forEach((el) => {
     el.hidden = el.dataset.ansicht !== name;
@@ -486,6 +515,8 @@ async function listeLaden(containerId, filter, wert) {
   try {
     const eintraege = await apiListe(filter, wert);
     cacheSchreiben(filter, wert, eintraege);
+    letzteAktualisierung = new Date();
+    aktualisierungsHinweisAktualisieren();
     if (container.dataset.anfrage !== anfrage) return;
     eintraegeRendern(eintraege, container);
   } catch (fehler) {
@@ -890,6 +921,7 @@ function einrichtungOeffnen() {
 }
 
 document.getElementById('einstellungen-btn').addEventListener('click', einrichtungOeffnen);
+document.getElementById('aktualisieren-btn').addEventListener('click', jetztAktualisieren);
 
 document.getElementById('einrichtung-abbrechen').addEventListener('click', () => {
   document.getElementById('einrichtung').hidden = true;

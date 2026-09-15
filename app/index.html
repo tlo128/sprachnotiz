@@ -41,8 +41,14 @@
 <div id="app">
   <header>
     <h1>Sprachnotiz</h1>
-    <span id="warteschlangen-hinweis"></span>
-    <button id="einstellungen-btn" aria-label="Einstellungen">⚙️</button>
+    <div class="header-status">
+      <span id="warteschlangen-hinweis"></span>
+      <span id="aktualisiert-hinweis"></span>
+    </div>
+    <div class="header-aktionen">
+      <button id="aktualisieren-btn" aria-label="Aktualisieren">🔄</button>
+      <button id="einstellungen-btn" aria-label="Einstellungen">⚙️</button>
+    </div>
   </header>
 
   <main>
