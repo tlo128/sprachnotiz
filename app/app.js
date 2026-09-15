@@ -2,7 +2,7 @@
 
 // Bei jeder Änderung an der PWA erhöhen. Der Cache-Name in sw.js zieht mit (gleiche Nummer),
 // damit das Handy die neue Version beim zweiten Start sicher übernimmt.
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.1';
 const APP_STAND = '15.09.2026';
 
 /* ===================== Konfiguration ===================== */
@@ -43,7 +43,18 @@ async function warteschlangeHinzufuegen(text, zeitstempel) {
   const db = await dbOeffnen();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).add({ text, zeitstempel });
+    tx.objectStore(STORE).add({ typ: 'erfassen', text, zeitstempel });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// eintragId statt id, weil "id" bereits der Primärschlüssel des IndexedDB-Objects ist.
+async function warteschlangeAktionHinzufuegen(aktion, eintragId, extra) {
+  const db = await dbOeffnen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).add({ typ: 'aktion', aktion, eintragId, extra: extra || null });
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
   });
@@ -123,7 +134,11 @@ async function warteschlangeSynchronisieren() {
     const eintraege = await warteschlangeAlle();
     for (const eintrag of eintraege) {
       try {
-        cacheNeueEintraege(await apiErfassen(eintrag.text, eintrag.zeitstempel));
+        if (eintrag.typ === 'aktion') {
+          await aktionSynchronisieren_(eintrag);
+        } else {
+          cacheNeueEintraege(await apiErfassen(eintrag.text, eintrag.zeitstempel));
+        }
         await warteschlangeEntfernen(eintrag.id);
       } catch (fehler) {
         break; // Beim ersten Fehler abbrechen, später erneut versuchen.
@@ -132,14 +147,29 @@ async function warteschlangeSynchronisieren() {
   } finally {
     synchronisiertGerade = false;
     warteschlangenHinweisAktualisieren();
+    aktuelleAnsichtAktualisieren();
   }
+}
+
+async function aktionSynchronisieren_(eintrag) {
+  if (eintrag.aktion === 'loeschen') {
+    await apiAufruf({ aktion: 'loeschen', id: eintrag.eintragId });
+    return;
+  }
+  const daten = { aktion: eintrag.aktion, id: eintrag.eintragId };
+  if (eintrag.aktion === 'aufgabe' || eintrag.aktion === 'termin' || eintrag.aktion === 'bearbeiten') {
+    daten.felder = eintrag.extra || {};
+  }
+  if (eintrag.aktion === 'verschieben') daten.datum = eintrag.extra && eintrag.extra.datum;
+  const antwort = await apiAufruf(daten);
+  cacheEintragAktualisieren(antwort.eintrag);
 }
 
 async function warteschlangenHinweisAktualisieren() {
   const hinweis = document.getElementById('warteschlangen-hinweis');
   const eintraege = await warteschlangeAlle();
   if (eintraege.length > 0) {
-    hinweis.textContent = eintraege.length + (eintraege.length === 1 ? ' Notiz wartet' : ' Notizen warten');
+    hinweis.textContent = eintraege.length + (eintraege.length === 1 ? ' Änderung wartet' : ' Änderungen warten');
     hinweis.classList.add('sichtbar');
   } else {
     hinweis.classList.remove('sichtbar');
@@ -362,16 +392,40 @@ function cacheNeueEintraege(eintraege) {
   });
 }
 
-// Geänderten Eintrag in allen Listen ersetzen bzw. entfernen, wenn er nicht mehr passt.
-function cacheEintragAktualisieren(eintrag) {
+// Geänderten Eintrag (voll oder als Teil-Update) in allen Listen einsetzen bzw. entfernen,
+// wenn er nicht mehr passt. Merged mit der bestehenden Cache-Kopie, damit ein optimistisches
+// Teil-Update (z.B. nur Status+Eingang) nicht die übrigen Felder der Karte leert.
+function cacheEintragAktualisieren(teilupdate) {
   cacheAlleAendern((liste, filter, wert) => {
-    const ohne = liste.filter((e) => e.ID !== eintrag.ID);
-    if (!eintragPasstZuFilter_(eintrag, filter, wert)) return ohne;
-    const index = liste.findIndex((e) => e.ID === eintrag.ID);
-    if (index === -1) return [eintrag].concat(ohne);
-    liste[index] = eintrag;
-    return liste;
+    const bestehend = liste.find((e) => e.ID === teilupdate.ID);
+    const voll = bestehend ? Object.assign({}, bestehend, teilupdate) : teilupdate;
+    const ohne = liste.filter((e) => e.ID !== teilupdate.ID);
+    if (!eintragPasstZuFilter_(voll, filter, wert)) return ohne;
+    return [voll].concat(ohne);
   });
+}
+
+// Bildet nach, was eine Aktion serverseitig ändern würde - für die sofortige Anzeige,
+// solange die Aktion noch offline in der Warteschlange liegt.
+function eintragOptimistischAendern_(eintrag, aktion, extra) {
+  const basis = { ID: eintrag.ID, Eingang: 'nein' };
+  if (aktion === 'uebernehmen') {
+    if (eintrag.Aktion_Vorschlag === 'Aufgabe') return Object.assign(basis, { Typ: 'Aufgabe', Status: 'offen' });
+    if (eintrag.Aktion_Vorschlag === 'Termin') return Object.assign(basis, { Typ: 'Termin', Status: 'offen' });
+    if (eintrag.Aktion_Vorschlag === 'Ablegen') return Object.assign(basis, { Status: 'abgelegt', Datum: '', Erinnerungsdatum: '' });
+    return basis;
+  }
+  if (aktion === 'aufgabe') {
+    return Object.assign(basis, { Typ: 'Aufgabe', Status: 'offen' }, extra && extra.datum !== undefined ? { Datum: extra.datum } : {});
+  }
+  if (aktion === 'termin') {
+    return Object.assign(basis, { Typ: 'Termin', Status: 'offen' }, extra && extra.uhrzeit !== undefined ? { Uhrzeit: extra.uhrzeit } : {});
+  }
+  if (aktion === 'verschieben') return Object.assign(basis, { Datum: extra.datum });
+  if (aktion === 'ablegen') return Object.assign(basis, { Status: 'abgelegt', Datum: '', Erinnerungsdatum: '' });
+  if (aktion === 'erledigt') return Object.assign(basis, { Status: 'erledigt' });
+  if (aktion === 'bearbeiten') return Object.assign({ ID: eintrag.ID, Eingang: 'nein' }, extra);
+  return basis;
 }
 
 function cacheEintraegeEntfernen(ids) {
@@ -635,26 +689,53 @@ function swipeAktivieren(karte, eintrag) {
 
 /* ===================== Aktionen (uebernehmen/aufgabe/termin/verschieben/ablegen/erledigt/loeschen) ===================== */
 
+// Führt eine Aktion aus. Ohne Netz (oder wenn der Server trotz "online" nicht erreichbar
+// ist) wird sie gepuffert und die Karte sofort optimistisch aktualisiert; beim nächsten
+// Online-Gehen sendet warteschlangeSynchronisieren() sie nach.
 async function aktionAusfuehren(aktion, eintrag, extra) {
-  try {
-    if (aktion === 'loeschen') {
-      await apiAufruf({ aktion: 'loeschen', id: eintrag.ID });
-      cacheEintraegeEntfernen([eintrag.ID]);
-      toastZeigen('Gelöscht', null);
+  if (aktion === 'loeschen') {
+    if (navigator.onLine) {
+      try {
+        await apiAufruf({ aktion: 'loeschen', id: eintrag.ID });
+        cacheEintraegeEntfernen([eintrag.ID]);
+        toastZeigen('Gelöscht', null);
+        aktuelleAnsichtAktualisieren();
+        return;
+      } catch (fehler) {
+        if (!(fehler instanceof NetzFehler)) { toastZeigen('Fehler: ' + fehler.message, null); return; }
+      }
+    }
+    await warteschlangeAktionHinzufuegen('loeschen', eintrag.ID, null);
+    cacheEintraegeEntfernen([eintrag.ID]);
+    warteschlangenHinweisAktualisieren();
+    toastZeigen('Offline gelöscht – wird nachgesendet', null);
+    aktuelleAnsichtAktualisieren();
+    return;
+  }
+
+  if (navigator.onLine) {
+    try {
+      const daten = { aktion, id: eintrag.ID };
+      if (aktion === 'aufgabe' || aktion === 'termin' || aktion === 'bearbeiten') daten.felder = extra || {};
+      if (aktion === 'verschieben') daten.datum = extra.datum;
+      const antwort = await apiAufruf(daten);
+      cacheEintragAktualisieren(antwort.eintrag);
       aktuelleAnsichtAktualisieren();
       return;
+    } catch (fehler) {
+      if (!(fehler instanceof NetzFehler)) {
+        toastZeigen('Fehler: ' + fehler.message, null);
+        return;
+      }
+      // sonst weiter zum Offline-Puffer
     }
-
-    const daten = { aktion, id: eintrag.ID };
-    if (aktion === 'aufgabe' || aktion === 'termin') daten.felder = extra || {};
-    if (aktion === 'verschieben') daten.datum = extra.datum;
-
-    const antwort = await apiAufruf(daten);
-    cacheEintragAktualisieren(antwort.eintrag);
-    aktuelleAnsichtAktualisieren();
-  } catch (fehler) {
-    toastZeigen(fehler instanceof NetzFehler ? 'Keine Verbindung – bitte erneut versuchen' : 'Fehler: ' + fehler.message, null);
   }
+
+  await warteschlangeAktionHinzufuegen(aktion, eintrag.ID, extra || null);
+  cacheEintragAktualisieren(eintragOptimistischAendern_(eintrag, aktion, extra));
+  warteschlangenHinweisAktualisieren();
+  toastZeigen('Offline gespeichert – wird nachgesendet', null);
+  aktuelleAnsichtAktualisieren();
 }
 
 /* ===================== Aktionen-Menü (Bottom Sheet) ===================== */
@@ -777,13 +858,8 @@ document.getElementById('bearbeiten-formular').addEventListener('submit', async 
     Kurzfassung: document.getElementById('b-kurzfassung').value.trim(),
     'Prüfen': false // wurde gerade vom Nutzer durchgesehen
   };
-  try {
-    const antwort = await apiAufruf({ aktion: 'bearbeiten', id: bearbeitenAktuelleId, felder });
-    cacheEintragAktualisieren(antwort.eintrag);
-    bearbeitenSchliessenUndZurueck();
-  } catch (fehler) {
-    alert('Speichern fehlgeschlagen: ' + fehler.message);
-  }
+  await aktionAusfuehren('bearbeiten', { ID: bearbeitenAktuelleId, Aktion_Vorschlag: '' }, felder);
+  bearbeitenSchliessenUndZurueck();
 });
 
 /* ===================== Verbindungsstatus ===================== */
