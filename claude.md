@@ -1,6 +1,6 @@
 # Sprachnotiz-App, Google-Variante mit Outlook-Anbindung
 
-Stand: 13. September 2026. Ersetzt alle früheren Fassungen. Sessions 1 bis 3 sind umgesetzt, die E-Mail-Erinnerung aus Session 3 wird in Session 4 wieder entfernt.
+Stand: 15. September 2026. Ersetzt alle früheren Fassungen. Sessions 1 bis 4 sind umgesetzt und im Betrieb. Als Nächstes: Session 5 (Outlook-Anbindung).
 
 ## Ziel
 
@@ -64,15 +64,19 @@ Ohne Netz: Textfeld statt Mikrofon, Puffer in IndexedDB, automatisches Nachsende
 
 ## Sessions
 
-Sessions 1 bis 3: erledigt (Backend, PWA, E-Mail-Erinnerung, Notion-Import falls bereits geschehen).
+Sessions 1 bis 4: erledigt (Backend, PWA, E-Mail-Erinnerung eingeführt und wieder entfernt, Dashboard/Eingang, Notion-Import bewusst ausgelassen).
 
-### Session 4: Dashboard und Eingang, E-Mail entfernen
+### Session 4: Dashboard und Eingang, E-Mail entfernen — erledigt
 
-- Bestandsaufnahme des vorhandenen Codes, dann E-Mail-Trigger und E-Mail-Code entfernen.
-- Datenmodell um die Zusatzfelder erweitern, bestehende Zeilen migrieren (Eingang = nein für alles, was älter ist als der Umbau).
-- Claude-Schema um empfohlene_aktion und uhrzeit erweitern.
-- PWA zum Dashboard umbauen: Eingang mit Vorschlag und Übernehmen, Heute, Woche, Projekt/Person, Suche. Aktionen als Buttons (PC) und Wischgesten (Handy). Outlook-Aktionen rufen bereits Backend-Funktionen auf, die in Session 4 noch nur das Sheet ändern.
-- Fertig, wenn: eine neue Notiz erscheint im Eingang mit Vorschlag, "Übernehmen" verschiebt sie korrekt nach Heute oder Woche oder Archiv, Verschieben und Abhaken funktionieren auf Handy und PC, keine E-Mail kommt mehr.
+- Bestandsaufnahme des vorhandenen Codes, dann E-Mail-Trigger und E-Mail-Code entfernt.
+- Datenmodell um die Zusatzfelder erweitert (idempotente Migration in SheetSetup.js, fügt Spalten an der richtigen Position ein statt ans Ende), bestehende Zeilen migriert (Eingang = nein, Geaendert = Erstellt).
+- Claude-Schema um empfohlene_aktion und uhrzeit erweitert (ClaudeClient.js), Systemprompt entsprechend angepasst.
+- Backend-Aktionen in Aktionen.js: uebernehmen, aufgabe, termin, verschieben, ablegen, erledigt, bearbeiten, loeschen. Schließen jeweils den Eingang und stempeln Geaendert. Outlook.js enthält die drei vorgesehenen Stub-Funktionen (outlook_erstellen/aktualisieren/loeschen), die aktuell nur loggen - die Aufrufstellen liegen aber schon an der richtigen Stelle.
+- PWA zum Dashboard umgebaut: Tabs Neu/Eingang/Heute/Woche/Suche, Projekt/Person weiterhin über anklickbare Chips erreichbar. Jede Karte zeigt bei offenem Eingang den KI-Vorschlag als Text plus großem "Übernehmen"-Button und "Andere Aktion" daneben. Alle sieben Aktionen über ein Bottom-Sheet-Menü, dazu Wischgesten auf dem Handy (rechts = übernehmen/erledigt, links = Menü), Buttons bleiben überall zusätzlich nutzbar (PC-Fallback).
+- Offline-Puffer (IndexedDB) gilt jetzt für alle Aktionen, nicht nur fürs Erfassen: neues Feld "typ" (erfassen/aktion) in der Warteschlange, optimistische Kartenaktualisierung, automatisches Nachsenden beim Online-Gehen.
+- Manueller "Jetzt aktualisieren"-Button im Header (sendet Warteschlange, lädt die aktuell sichtbare Liste neu) plus "Aktualisiert HH:MM"-Anzeige, weil bei PC+Handy-Nutzung parallel unklar war, wie aktuell die Ansicht ist.
+- Web-App-Deployment lief in Session 4 mehrfach auf dieselbe Deployment-ID neu aus (aktuell Version 3), PWA auf GitHub Pages aktuell Version 2.2.
+- Getestet und bestätigt: neue Notiz erscheint im Eingang mit passendem Vorschlag, Übernehmen/Verschieben/Abhaken funktionieren auf Galaxy und PC, im Flugmodus abgehakte Einträge werden nachgesendet, kein E-Mail-Trigger mehr vorhanden, Refresh-Button auf beiden Geräten bestätigt.
 
 ### Session 5: Outlook-Anbindung
 
