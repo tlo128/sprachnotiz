@@ -188,6 +188,7 @@ body.offline #mikrofon-btn, body.keine-spracherkennung #mikrofon-btn { display: 
 }
 
 .karte .titel { font-weight: 600; }
+.outlook-symbol { margin-left: 6px; font-size: 0.85em; }
 .karte .datum { font-size: 0.8rem; color: var(--text-schwach); white-space: nowrap; }
 .karte .kurzfassung { font-size: 0.9rem; color: var(--text-schwach); margin-top: 4px; }
 

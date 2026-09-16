@@ -2,8 +2,8 @@
 
 // Bei jeder Änderung an der PWA erhöhen. Der Cache-Name in sw.js zieht mit (gleiche Nummer),
 // damit das Handy die neue Version beim zweiten Start sicher übernimmt.
-const APP_VERSION = '2.4';
-const APP_STAND = '15.09.2026';
+const APP_VERSION = '2.5';
+const APP_STAND = '16.09.2026';
 
 /* ===================== Konfiguration ===================== */
 
@@ -607,6 +607,13 @@ function karteErstellen(eintrag) {
   const titel = document.createElement('span');
   titel.className = 'titel';
   titel.textContent = eintrag.Titel || '(ohne Titel)';
+  if (eintrag.Outlook_ID) {
+    const outlookSymbol = document.createElement('span');
+    outlookSymbol.className = 'outlook-symbol';
+    outlookSymbol.textContent = '🔗';
+    outlookSymbol.title = 'Mit Outlook verknüpft';
+    titel.appendChild(outlookSymbol);
+  }
   const datum = document.createElement('span');
   datum.className = 'datum';
   datum.textContent = formatDatum(eintrag.Datum) || formatDatum(eintrag.Erstellt);
