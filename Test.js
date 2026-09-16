@@ -4,7 +4,21 @@
 // "nächsten Dienstag" -> 2026-09-15, "übermorgen" -> 2026-09-11,
 // "Ende des Monats" -> 2026-09-30.
 
+// ACHTUNG: Diese Tests schreiben in das echte Sheet und - seit Session 5, weil die
+// Outlook-Stubs durch echte Graph-Aufrufe ersetzt wurden - über Aktionen.js auch in die
+// echte To-Do-Liste bzw. den echten Kalender "Notizen". Zum Ausführen hier auf true
+// setzen und danach wieder auf false.
+var TESTS_AKTIV = false;
+
+function testsErlaubt_() {
+  if (TESTS_AKTIV) return true;
+  Logger.log('Tests sind deaktiviert. Zum Ausführen TESTS_AKTIV in Test.js auf true setzen ' +
+    '(schreibt dann in das echte Sheet UND nach Outlook).');
+  return false;
+}
+
 function testMitBeispielsaetzen() {
+  if (!testsErlaubt_()) return;
   var jetzt = '2026-09-09T10:00:00+02:00';
 
   var saetze = [
@@ -40,6 +54,7 @@ function testMitBeispielsaetzen() {
 // Schreibvarianten übernommen werden und spätere Notizen darüber wieder
 // gefunden werden. Im Editor ausführen: testAliase()
 function testAliase() {
+  if (!testsErlaubt_()) return;
   var jetzt = '2026-09-09T10:00:00+02:00';
 
   var satz1 = 'Herr Eckert, den nennen manche auch Alex, ist von der Firma Inwatec und möchte die Musterwohnung im Lindenpark besichtigen.';
@@ -60,6 +75,7 @@ function testAliase() {
 // Testet empfohlene_aktion/uhrzeit: je ein klarer Fall für Aufgabe, Termin, Ablegen.
 // Im Editor ausführen: testAktionsvorschlag()
 function testAktionsvorschlag() {
+  if (!testsErlaubt_()) return;
   var jetzt = '2026-09-09T10:00:00+02:00';
 
   var faelle = [
@@ -80,6 +96,7 @@ function testAktionsvorschlag() {
 // Testet die Dashboard-Aktionen: uebernehmen, verschieben, erledigt, ablegen, loeschen.
 // Im Editor ausführen: testAktionen()
 function testAktionen() {
+  if (!testsErlaubt_()) return;
   var jetzt = '2026-09-09T10:00:00+02:00';
 
   var e1 = verarbeite('Ich muss Frau Nguyen noch wegen der Kaution zurückrufen.', jetzt)[0];
@@ -102,7 +119,7 @@ function testAktionen() {
   var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
   Logger.log('Eintrag 2 gelöscht, Zeile jetzt: %s (sollte -1 sein)', findeZeileNachId_(notizen, e2.ID));
 
-  Logger.log('Fertig. Im Ausführungsprotokoll sollten dazwischen auch [Outlook-Stub]-Zeilen für Eintrag 1 auftauchen.');
+  Logger.log('Fertig. Eintrag 1 wurde dabei auch wirklich in der To-Do-Liste "Notizen" angelegt, geändert und abgehakt.');
 }
 
 // Prüft, ob die Uhrzeit-Spalte als Klartext gespeichert wird (nicht von Sheets in einen
@@ -110,6 +127,7 @@ function testAktionen() {
 // WICHTIG: vorher einrichtenSheet() ausführen, sonst greift die Klartext-Formatierung noch
 // nicht. Im Editor ausführen: testUhrzeitAlsText()
 function testUhrzeitAlsText() {
+  if (!testsErlaubt_()) return;
   var jetzt = '2026-09-09T10:00:00+02:00';
   var eintraege = verarbeite('Morgen um 14 Uhr Besichtigung mit Herrn Bauer im Lindenpark.', jetzt);
   var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
@@ -120,6 +138,7 @@ function testUhrzeitAlsText() {
 // Prüft die Idempotenz: derselbe clientId-Aufruf darf keine zweite Zeile erzeugen.
 // Im Editor ausführen: testIdempotenz()
 function testIdempotenz() {
+  if (!testsErlaubt_()) return;
   var jetzt = '2026-09-09T10:00:00+02:00';
   var clientId = 'test-idempotenz-' + new Date().getTime();
   var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);

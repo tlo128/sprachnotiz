@@ -32,6 +32,11 @@ var PREISE = {
 
 var CONFIDENCE_SCHWELLE = 0.7;
 
+// Obergrenze für Claude-Läufe pro Tag (siehe tageslimitPruefenUndZaehlen_ in Verarbeiten.js).
+// Großzügig gewählt - im Alltag entstehen einige wenige Notizen am Tag; die Grenze greift
+// nur, wenn etwas grundsätzlich schiefläuft.
+var MAX_ERFASSEN_PRO_TAG = 200;
+
 var ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 var ANTHROPIC_VERSION = '2023-06-01';
 

@@ -2,7 +2,7 @@
 
 // Bei jeder Änderung an der PWA erhöhen. Der Cache-Name in sw.js zieht mit (gleiche Nummer),
 // damit das Handy die neue Version beim zweiten Start sicher übernimmt.
-const APP_VERSION = '2.5';
+const APP_VERSION = '2.6';
 const APP_STAND = '16.09.2026';
 
 /* ===================== Konfiguration ===================== */
@@ -35,8 +35,29 @@ function dbOeffnen() {
       anfrage.result.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
     };
     anfrage.onsuccess = () => resolve(anfrage.result);
-    anfrage.onerror = () => reject(anfrage.error);
+    anfrage.onerror = () => reject(anfrage.error || new Error('IndexedDB nicht verfügbar.'));
+    anfrage.onblocked = () => reject(new Error('IndexedDB blockiert (anderer Tab offen?).'));
   });
+}
+
+// Eine Transaktion, danach die Verbindung wieder schließen. Früher blieb pro Queue-
+// Operation eine offene Verbindung zurück; die hätten bei einem späteren Anheben von
+// DB_VERSION das Upgrade blockiert.
+async function dbAktion_(modus, arbeit) {
+  const db = await dbOeffnen();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, modus);
+      let ergebnis;
+      const anfrage = arbeit(tx.objectStore(STORE));
+      if (anfrage) anfrage.onsuccess = () => { ergebnis = anfrage.result; };
+      tx.oncomplete = () => resolve(ergebnis);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Transaktion abgebrochen.'));
+    });
+  } finally {
+    db.close();
+  }
 }
 
 // Erzeugt eine Kennung pro Erfassungsversuch (nicht pro Notiz-Inhalt), damit der Server
@@ -47,43 +68,32 @@ function clientIdErzeugen_() {
 }
 
 async function warteschlangeHinzufuegen(text, zeitstempel, clientId) {
-  const db = await dbOeffnen();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).add({ typ: 'erfassen', text, zeitstempel, clientId });
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+  return dbAktion_('readwrite', (speicher) =>
+    speicher.add({ typ: 'erfassen', text, zeitstempel, clientId, versuche: 0 }));
 }
 
 // eintragId statt id, weil "id" bereits der Primärschlüssel des IndexedDB-Objects ist.
 async function warteschlangeAktionHinzufuegen(aktion, eintragId, extra) {
-  const db = await dbOeffnen();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).add({ typ: 'aktion', aktion, eintragId, extra: extra || null });
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+  return dbAktion_('readwrite', (speicher) =>
+    speicher.add({ typ: 'aktion', aktion, eintragId, extra: extra || null, versuche: 0 }));
 }
 
 async function warteschlangeAlle() {
-  const db = await dbOeffnen();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const anfrage = tx.objectStore(STORE).getAll();
-    anfrage.onsuccess = () => resolve(anfrage.result);
-    anfrage.onerror = () => reject(anfrage.error);
-  });
+  return (await dbAktion_('readonly', (speicher) => speicher.getAll())) || [];
 }
 
 async function warteschlangeEntfernen(id) {
-  const db = await dbOeffnen();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).delete(id);
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
+  return dbAktion_('readwrite', (speicher) => speicher.delete(id));
+}
+
+// Merkt am gepufferten Eintrag, dass ein Versuch danebenging - siehe MAX_VERSUCHE.
+async function warteschlangeAktualisieren(id, aenderungen) {
+  return dbAktion_('readwrite', (speicher) => {
+    const anfrage = speicher.get(id);
+    anfrage.onsuccess = () => {
+      if (anfrage.result) speicher.put(Object.assign(anfrage.result, aenderungen));
+    };
+    return null; // eigenes onsuccess oben, kein Rückgabewert nötig
   });
 }
 
@@ -134,8 +144,22 @@ async function apiRueckgaengig(ids) {
 
 let synchronisiertGerade = false;
 
+// Wie oft ein gepufferter Eintrag bei einem fachlichen Fehler erneut versucht wird, bevor
+// aufgegeben wird. Ein einzelner Versuch reicht nicht: "kein Netzfehler" heißt noch lange
+// nicht "kann nie klappen". Apps Script antwortet bei Kontingentproblemen oder während
+// eines Deployments mit einer HTML-Fehlerseite, doPost meldet Lock-Timeouts als ok:false,
+// und ein gerade gewechselter Schlüssel sieht genauso aus. Früher wurde der Eintrag in
+// all diesen Fällen sofort verworfen - bei einer Notiz ist das der Verlust des einzigen
+// Exemplars des diktierten Textes.
+const MAX_VERSUCHE = 3;
+
 async function warteschlangeSynchronisieren() {
   if (synchronisiertGerade || !navigator.onLine) return;
+  // Ohne Zugangsdaten scheitert jeder Aufruf mit einem fachlichen Fehler und würde die
+  // Versuche der gepufferten Einträge aufbrauchen - also gar nicht erst anfangen.
+  const { url, schluessel } = konfigLaden();
+  if (!url || !schluessel) return;
+
   synchronisiertGerade = true;
   try {
     const eintraege = await warteschlangeAlle();
@@ -151,10 +175,15 @@ async function warteschlangeSynchronisieren() {
         if (fehler instanceof NetzFehler) {
           break; // Netzproblem - Reihenfolge bleibt erhalten, später erneut versuchen.
         }
-        // Fachlicher Fehler (z.B. Eintrag inzwischen gelöscht) kann nie klappen - sonst
-        // blockiert er alle danach gepufferten Notizen/Aktionen für immer.
+        // Fachlicher Fehler: begrenzt oft erneut versuchen, aber nicht wie früher alles
+        // Nachfolgende blockieren - deshalb weiter mit dem nächsten Eintrag.
+        const versuche = (eintrag.versuche || 0) + 1;
+        if (versuche < MAX_VERSUCHE) {
+          await warteschlangeAktualisieren(eintrag.id, { versuche, letzterFehler: fehler.message });
+          continue;
+        }
         await warteschlangeEntfernen(eintrag.id);
-        toastZeigen('Konnte nicht nachgesendet werden: ' + fehler.message, null);
+        aufgegebenMelden_(eintrag, fehler);
       }
     }
   } finally {
@@ -162,6 +191,23 @@ async function warteschlangeSynchronisieren() {
     warteschlangenHinweisAktualisieren();
     aktuelleAnsichtAktualisieren();
   }
+}
+
+// Letzte Rettung, wenn ein gepufferter Eintrag endgültig nicht durchgeht. Bei einer Aktion
+// ist das verschmerzbar (der Eintrag selbst steht ja im Sheet), bei einer Notiz nicht: ihr
+// Text existiert nirgends sonst und wandert deshalb zurück ins Eingabefeld.
+function aufgegebenMelden_(eintrag, fehler) {
+  if (eintrag.typ === 'erfassen' && eintrag.text) {
+    textInEingabefeldZurueck_(eintrag.text);
+    toastZeigen('Notiz nicht gespeichert (' + fehler.message + ') - Text steht wieder unter "Neu".', null);
+    return;
+  }
+  toastZeigen('Konnte nicht nachgesendet werden: ' + fehler.message, null);
+}
+
+function textInEingabefeldZurueck_(text) {
+  const feld = document.getElementById('text-eingabe');
+  feld.value = feld.value.trim() ? feld.value.trim() + '\n\n' + text : text;
 }
 
 async function aktionSynchronisieren_(eintrag) {
@@ -282,7 +328,15 @@ async function fertig() {
     }
   }
 
-  await warteschlangeHinzufuegen(text, zeitstempel, clientId);
+  // Das Textfeld ist oben schon geleert - schlägt das Puffern fehl (IndexedDB blockiert,
+  // voll oder im privaten Modus nicht nutzbar), wäre die Notiz sonst spurlos weg.
+  try {
+    await warteschlangeHinzufuegen(text, zeitstempel, clientId);
+  } catch (fehler) {
+    textInEingabefeldZurueck_(text);
+    toastZeigen('Konnte nicht gepuffert werden: ' + fehler.message, null);
+    return;
+  }
   warteschlangenHinweisAktualisieren();
   toastZeigen('Offline gespeichert – wird nachgesendet', null);
 }
@@ -416,11 +470,14 @@ function eintragOptimistischAendern_(eintrag, aktion, extra) {
     if (eintrag.Aktion_Vorschlag === 'Ablegen') return Object.assign(basis, { Status: 'abgelegt', Datum: '', Erinnerungsdatum: '' });
     return basis;
   }
-  if (aktion === 'aufgabe') {
-    return Object.assign(basis, { Typ: 'Aufgabe', Status: 'offen' }, extra && extra.datum !== undefined ? { Datum: extra.datum } : {});
-  }
-  if (aktion === 'termin') {
-    return Object.assign(basis, { Typ: 'Termin', Status: 'offen' }, extra && extra.uhrzeit !== undefined ? { Uhrzeit: extra.uhrzeit } : {});
+  if (aktion === 'aufgabe' || aktion === 'termin') {
+    // Feldnamen wie im Sheet und in Aktionen.js (groß geschrieben), nicht kleingeschrieben -
+    // sonst weicht die optimistische Karte von dem ab, was der Server tatsächlich setzt.
+    const felder = { Typ: aktion === 'aufgabe' ? 'Aufgabe' : 'Termin', Status: 'offen' };
+    ['Datum', 'Uhrzeit', 'Erinnerungsdatum'].forEach((name) => {
+      if (extra && extra[name] !== undefined) felder[name] = extra[name];
+    });
+    return Object.assign(basis, felder);
   }
   if (aktion === 'verschieben') return Object.assign(basis, { Datum: extra.datum });
   if (aktion === 'ablegen') return Object.assign(basis, { Status: 'abgelegt', Datum: '', Erinnerungsdatum: '' });
@@ -565,7 +622,7 @@ document.getElementById('liste-filter-loeschen').addEventListener('click', () =>
 
 const STATUS_KLASSE = {
   offen: 'status-offen', erledigt: 'status-erledigt', abgelegt: 'status-abgelegt',
-  wartend: 'status-abgelegt', 'prüfen': 'status-pruefen'
+  'prüfen': 'status-pruefen'
 };
 
 function vorschlagText(eintrag) {
@@ -769,7 +826,12 @@ async function aktionAusfuehren(aktion, eintrag, extra) {
         if (!(fehler instanceof NetzFehler)) { toastZeigen('Fehler: ' + fehler.message, null); return; }
       }
     }
-    await warteschlangeAktionHinzufuegen('loeschen', eintrag.ID, null);
+    try {
+      await warteschlangeAktionHinzufuegen('loeschen', eintrag.ID, null);
+    } catch (fehler) {
+      toastZeigen('Aktion konnte nicht gepuffert werden: ' + fehler.message, null);
+      return;
+    }
     cacheEintraegeEntfernen([eintrag.ID]);
     warteschlangenHinweisAktualisieren();
     toastZeigen('Offline gelöscht – wird nachgesendet', null);
@@ -795,7 +857,12 @@ async function aktionAusfuehren(aktion, eintrag, extra) {
     }
   }
 
-  await warteschlangeAktionHinzufuegen(aktion, eintrag.ID, extra || null);
+  try {
+    await warteschlangeAktionHinzufuegen(aktion, eintrag.ID, extra || null);
+  } catch (fehler) {
+    toastZeigen('Aktion konnte nicht gepuffert werden: ' + fehler.message, null);
+    return;
+  }
   cacheEintragAktualisieren(eintragOptimistischAendern_(eintrag, aktion, extra));
   warteschlangenHinweisAktualisieren();
   toastZeigen('Offline gespeichert – wird nachgesendet', null);

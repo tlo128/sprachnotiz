@@ -73,7 +73,9 @@ function graphFetch_(pfad, methode, payload) {
   var body = text ? JSON.parse(text) : {};
 
   if (code < 200 || code >= 300) {
-    throw new Error('Microsoft Graph Fehler (' + code + '): ' + (body.error && body.error.message ? body.error.message : text));
+    var fehler = new Error('Microsoft Graph Fehler (' + code + '): ' + (body.error && body.error.message ? body.error.message : text));
+    fehler.graphCode = code; // Aufrufer unterscheiden damit "dauerhaft weg" (404) von "gerade nicht"
+    throw fehler;
   }
   return body;
 }
@@ -145,10 +147,12 @@ function outlook_erstellen(eintrag) {
     else if (eintrag.Typ === 'Termin') ergebnis = outlookTerminErstellen_(eintrag);
     else { outlookFehlerMerken_('outlook_erstellen: ID ' + eintrag.ID + ' hat Typ "' + eintrag.Typ + '", weder Aufgabe noch Termin - übersprungen.'); return; }
     outlookVerknuepfungSpeichern_(eintrag.ID, ergebnis.id, eintrag.Typ, ergebnis.lastModifiedDateTime);
+    outlookNachholenErledigt_(eintrag.ID);
     outlookFehlerMerken_('OK: erstellen ID ' + eintrag.ID + ' -> Outlook-ID ' + ergebnis.id);
   } catch (fehler) {
     var nachricht = 'Outlook erstellen fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler;
     Logger.log(nachricht);
+    outlookNachholenMerken_(eintrag.ID, outlookNachholenVersuch_);
     outlookFehlerMerken_(nachricht);
   }
 }
@@ -165,10 +169,19 @@ function outlook_aktualisieren(eintrag) {
     }
     var ergebnis = eintrag.Outlook_Typ === 'Aufgabe' ? outlookAufgabeAktualisieren_(eintrag) : outlookTerminAktualisieren_(eintrag);
     outlookVerknuepfungSpeichern_(eintrag.ID, eintrag.Outlook_ID, eintrag.Outlook_Typ, ergebnis.lastModifiedDateTime);
+    outlookNachholenErledigt_(eintrag.ID);
     outlookFehlerMerken_('OK: aktualisieren ID ' + eintrag.ID);
   } catch (fehler) {
     var nachricht = 'Outlook aktualisieren fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler;
+    if (fehler.graphCode === 404 || fehler.graphCode === 410) {
+      // Das Element gibt es in Outlook nicht mehr (dort von Hand gelöscht). Ohne Lösen der
+      // Verknüpfung würde der PATCH auf ewig scheitern; so legt der nächste Versuch ein
+      // frisches an.
+      outlookVerknuepfungLoeschen_(eintrag.ID);
+      nachricht += ' - Element in Outlook nicht mehr vorhanden, Verknüpfung gelöst.';
+    }
     Logger.log(nachricht);
+    outlookNachholenMerken_(eintrag.ID, outlookNachholenVersuch_);
     outlookFehlerMerken_(nachricht);
   }
 }
@@ -181,6 +194,96 @@ function outlook_loeschen(eintrag) {
   } catch (fehler) {
     Logger.log('Outlook löschen fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler);
   }
+}
+
+/* ----- Nachholliste: Pushes, die gerade nicht durchgingen ----- */
+// Ein fehlgeschlagenes Anlegen erkennt man an der leer gebliebenen Outlook_ID; es wird beim
+// nächsten Anfassen des Eintrags von selbst wiederholt. Für ein fehlgeschlagenes
+// Aktualisieren gibt es keinen solchen Marker: Outlooks lastModifiedDateTime ändert sich
+// dabei ja nicht, der 15-Minuten-Abgleich sieht also nichts, und Sheet und Outlook laufen
+// still auseinander - unbegrenzt lange, falls der Eintrag nie wieder angefasst wird.
+// Deshalb werden gescheiterte Pushes hier vorgemerkt und alle 15 Minuten erneut versucht.
+var OUTLOOK_NACHHOLEN_MAX = 100;
+// Nach so vielen vergeblichen Anläufen wird aufgegeben. Bei einem 15-Minuten-Takt sind das
+// rund zwei Stunden - lange genug für Throttling oder eine Graph-Störung, kurz genug, dass
+// ein dauerhaft unmöglicher Push nicht für immer alle 15 Minuten Aufrufe verbraucht.
+var OUTLOOK_NACHHOLEN_VERSUCHE = 8;
+
+// Zählerstand des gerade nachgeholten Eintrags. Modulweite Variable statt zusätzlichem
+// Parameter, damit outlook_erstellen/outlook_aktualisieren ihre Signatur behalten - sie
+// werden ja ganz normal auch aus Aktionen.js aufgerufen, wo es keinen Zähler gibt.
+var outlookNachholenVersuch_ = 0;
+
+// Einträge sind { id: <Notiz-ID>, v: <Anzahl bisheriger Versuche> }.
+function outlookNachholenLesen_() {
+  try {
+    var roh = PropertiesService.getScriptProperties().getProperty('OUTLOOK_NACHHOLEN');
+    var liste = roh ? JSON.parse(roh) : [];
+    if (!Array.isArray(liste)) return [];
+    return liste
+      .map(function (e) {
+        return (e && typeof e === 'object') ? { id: Number(e.id), v: Number(e.v) || 0 } : { id: Number(e), v: 0 };
+      })
+      .filter(function (e) { return isFinite(e.id) && e.id > 0; });
+  } catch (e) {
+    return [];
+  }
+}
+
+function outlookNachholenSchreiben_(liste) {
+  PropertiesService.getScriptProperties()
+    .setProperty('OUTLOOK_NACHHOLEN', JSON.stringify(liste.slice(-OUTLOOK_NACHHOLEN_MAX)));
+}
+
+function outlookNachholenMerken_(id, bisherigeVersuche) {
+  try {
+    var versuche = (Number(bisherigeVersuche) || 0) + 1;
+    if (versuche > OUTLOOK_NACHHOLEN_VERSUCHE) {
+      // Im Normalfall ist die ID hier schon ausgetragen (outlookNachholenAusfuehren_ nimmt
+      // sie vor dem Versuch heraus) - sicherheitshalber trotzdem, damit "aufgegeben" immer
+      // heißt: steht nicht mehr in der Liste.
+      outlookNachholenErledigt_(id);
+      var aufgegeben = 'Nachholen aufgegeben nach ' + OUTLOOK_NACHHOLEN_VERSUCHE + ' Versuchen (ID ' + id + ').';
+      Logger.log(aufgegeben);
+      outlookFehlerMerken_(aufgegeben);
+      return;
+    }
+    var liste = outlookNachholenLesen_().filter(function (e) { return e.id !== Number(id); });
+    liste.push({ id: Number(id), v: versuche });
+    outlookNachholenSchreiben_(liste);
+  } catch (e) { /* Vormerken darf die eigentliche Aktion nie stören */ }
+}
+
+function outlookNachholenErledigt_(id) {
+  try {
+    var liste = outlookNachholenLesen_();
+    var ohne = liste.filter(function (e) { return e.id !== Number(id); });
+    if (ohne.length !== liste.length) outlookNachholenSchreiben_(ohne);
+  } catch (e) { /* s.o. */ }
+}
+
+/**
+ * Versucht vorgemerkte, zuvor gescheiterte Pushes erneut. Läuft zu Beginn von
+ * outlookAbgleichen(), also alle 15 Minuten. Die ID wird vorher aus der Liste genommen -
+ * klappt es wieder nicht, tragen outlook_erstellen/outlook_aktualisieren sie von selbst
+ * erneut ein. Einträge, die es im Sheet nicht mehr gibt, fallen so ebenfalls heraus.
+ */
+function outlookNachholenAusfuehren_() {
+  var liste = outlookNachholenLesen_();
+  if (!liste.length) return;
+  Logger.log('Outlook-Nachholliste: ' + liste.length + ' Einträge werden erneut versucht.');
+  liste.forEach(function (ref) {
+    outlookNachholenErledigt_(ref.id);
+    outlookNachholenVersuch_ = ref.v;
+    try {
+      outlookSynchronisieren_(eintragLesen_(ref.id));
+    } catch (fehler) {
+      // Notiz gibt es nicht mehr - durch das Austragen oben ist sie damit auch raus.
+      Logger.log('Nachholen übersprungen (ID ' + ref.id + '): ' + fehler);
+    } finally {
+      outlookNachholenVersuch_ = 0;
+    }
+  });
 }
 
 function outlookVerknuepfungSpeichern_(id, outlookId, outlookTyp, lastModifiedDateTime) {
@@ -264,30 +367,39 @@ var TERMIN_DAUER_MINUTEN = 60;
 var TERMIN_ERINNERUNG_MINUTEN = 30;
 
 function outlookTerminErstellen_(eintrag) {
-  return graphFetch_('/me/calendars/' + outlookKalenderId_() + '/events', 'post', outlookTerminKoerper_(eintrag));
+  return graphFetch_('/me/calendars/' + outlookKalenderId_() + '/events', 'post', outlookTerminKoerper_(eintrag, true));
 }
 
 function outlookTerminAktualisieren_(eintrag) {
-  return graphFetch_('/me/calendars/' + outlookKalenderId_() + '/events/' + eintrag.Outlook_ID, 'patch', outlookTerminKoerper_(eintrag));
+  return graphFetch_('/me/calendars/' + outlookKalenderId_() + '/events/' + eintrag.Outlook_ID, 'patch', outlookTerminKoerper_(eintrag, false));
 }
 
 function outlookTerminLoeschen_(eintrag) {
   graphFetch_('/me/calendars/' + outlookKalenderId_() + '/events/' + eintrag.Outlook_ID, 'delete');
 }
 
-function outlookTerminKoerper_(eintrag) {
-  var datum = outlookNurDatum_(eintrag.Datum) || Utilities.formatDate(new Date(), 'Europe/Berlin', 'yyyy-MM-dd');
-  var uhrzeit = eintrag.Uhrzeit || '09:00';
-  var start = new Date(datum + 'T' + uhrzeit + ':00');
-  var ende = new Date(start.getTime() + TERMIN_DAUER_MINUTEN * 60 * 1000);
-
+function outlookTerminKoerper_(eintrag, istNeu) {
   var body = {
     subject: eintrag.Titel || '(ohne Titel)',
-    start: { dateTime: datum + 'T' + uhrzeit + ':00', timeZone: 'Europe/Berlin' },
-    end: { dateTime: Utilities.formatDate(ende, 'Europe/Berlin', "yyyy-MM-dd'T'HH:mm:ss"), timeZone: 'Europe/Berlin' },
     isReminderOn: true,
     reminderMinutesBeforeStart: TERMIN_ERINNERUNG_MINUTEN
   };
+
+  // Ohne Datum beim Aktualisieren start/end weglassen. Sonst zieht ein geleertes Datum
+  // (Ablegen, oder das Datumsfeld im Bearbeiten-Formular geleert) den Termin im Kalender
+  // stillschweigend auf heute - das ist schlimmer, als ihn stehen zu lassen, und es
+  // entspricht dem, was outlookAufgabeKoerper_ mit dueDateTime ohnehin schon macht.
+  // Beim Anlegen braucht Graph dagegen zwingend eine Startzeit.
+  var datum = outlookNurDatum_(eintrag.Datum);
+  if (datum || istNeu) {
+    if (!datum) datum = Utilities.formatDate(new Date(), 'Europe/Berlin', 'yyyy-MM-dd');
+    var uhrzeit = eintrag.Uhrzeit || '09:00';
+    var start = new Date(datum + 'T' + uhrzeit + ':00');
+    var ende = new Date(start.getTime() + TERMIN_DAUER_MINUTEN * 60 * 1000);
+    body.start = { dateTime: datum + 'T' + uhrzeit + ':00', timeZone: 'Europe/Berlin' };
+    body.end = { dateTime: Utilities.formatDate(ende, 'Europe/Berlin', "yyyy-MM-dd'T'HH:mm:ss"), timeZone: 'Europe/Berlin' };
+  }
+
   var beschreibung = outlookBeschreibung_(eintrag);
   if (beschreibung) body.body = { content: beschreibung, contentType: 'text' };
   return body;
@@ -316,6 +428,13 @@ function outlookTriggerEinrichten() {
  * geänderte Seite - Vergleich von Outlooks lastModifiedDateTime gegen Geaendert.
  */
 function outlookAbgleichen() {
+  try {
+    outlookNachholenAusfuehren_();
+  } catch (fehler) {
+    // Ein Problem beim Nachholen darf die Gegenrichtung (Outlook -> Sheet) nicht blockieren.
+    Logger.log('Outlook-Nachholliste fehlgeschlagen: ' + fehler);
+  }
+
   var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
   var verknuepft = alleZeilenAlsObjekte_(notizen).filter(function (e) { return e.Outlook_ID; });
   if (!verknuepft.length) {
@@ -339,7 +458,7 @@ function outlookAbgleichen() {
       var sheetGeaendert = eintrag.Geaendert ? new Date(eintrag.Geaendert) : new Date(0);
       if (sheetGeaendert > bekanntSeit && sheetGeaendert >= outlookGeaendert) return; // Sheet zuletzt geändert, gewinnt
 
-      var setzen = eintrag.Outlook_Typ === 'Aufgabe' ? outlookAufgabeAlsFelder_(item) : outlookTerminAlsFelder_(item);
+      var setzen = eintrag.Outlook_Typ === 'Aufgabe' ? outlookAufgabeAlsFelder_(item, eintrag) : outlookTerminAlsFelder_(item);
       setzen.Outlook_Geaendert = outlookGeaendert;
       eintragFelderSetzen_(eintrag.ID, setzen, false);
       aktualisiert++;
@@ -374,8 +493,17 @@ function outlookAlsBerlinerZeit_(graphZeit) {
   return new Date(text);
 }
 
-function outlookAufgabeAlsFelder_(task) {
-  var felder = { Status: task.status === 'completed' ? 'erledigt' : 'offen' };
+function outlookAufgabeAlsFelder_(task, eintrag) {
+  var felder = {};
+  // Nur zwischen erledigt und offen umschalten, sonst den Status im Sheet in Ruhe lassen.
+  // Vorher setzte jede beliebige Änderung in To Do (Titel, Notiz, Priorität) einen
+  // abgelegten oder zu prüfenden Eintrag auf "offen" zurück - er tauchte dann wieder
+  // unter Heute/Woche auf.
+  if (task.status === 'completed') {
+    if (eintrag.Status !== 'erledigt') felder.Status = 'erledigt';
+  } else if (eintrag.Status === 'erledigt') {
+    felder.Status = 'offen';
+  }
   if (task.dueDateTime && task.dueDateTime.dateTime) {
     felder.Datum = Utilities.formatDate(outlookAlsBerlinerZeit_(task.dueDateTime), 'Europe/Berlin', 'yyyy-MM-dd');
   }

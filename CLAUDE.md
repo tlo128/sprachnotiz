@@ -1,6 +1,6 @@
 # Sprachnotiz-App, Google-Variante mit Outlook-Anbindung
 
-Stand: 16. September 2026. Ersetzt alle früheren Fassungen. Sessions 1 bis 5 sind umgesetzt und im Betrieb, dazwischen eine Review-Nachbesserungsrunde. Als Nächstes: Session 6 (Feinschliff).
+Stand: 16. September 2026. Ersetzt alle früheren Fassungen. Sessions 1 bis 5 sind umgesetzt und im Betrieb, dazwischen zwei Review-Nachbesserungsrunden. Als Nächstes: Session 6 (Feinschliff).
 
 ## Ziel
 
@@ -28,7 +28,7 @@ Zusatzfelder: Uhrzeit | Kurzfassung | Originaltext | Confidence | Prüfen | Eing
 - Typ: Aufgabe, Termin, Notiz, Entscheidung, Kontakt
 - Eingang: ja, solange der Nutzer den Eintrag noch nicht angefasst hat
 - Aktion_Vorschlag: Aufgabe, Termin, Ablegen (von der KI gesetzt)
-- Outlook_ID und Outlook_Typ (task oder event): Verknüpfung zu Outlook, leer solange nicht übernommen
+- Outlook_ID und Outlook_Typ (Aufgabe oder Termin, gleiche Werte wie in Typ): Verknüpfung zu Outlook, leer solange nicht übernommen
 - Blätter "Personen" und "Projekte": bekannte Namen plus Schreibvarianten, wachsen automatisch
 
 ## Ablauf im Alltag
@@ -38,7 +38,7 @@ Zusatzfelder: Uhrzeit | Kurzfassung | Originaltext | Confidence | Prüfen | Eing
 3. Im Eingang (Handy oder PC): ein Tipp auf "Übernehmen" führt den Vorschlag aus, oder eine der anderen Aktionen wählen. Erst dann schreibt die App nach Outlook. Nichts geht ohne Entscheidung des Nutzers nach Outlook.
 4. Einträge mit erkanntem Datum erscheinen in der App unter Heute und Woche, auch wenn sie noch im Eingang liegen. Der Eingang blockiert nichts.
 
-Aktionen pro Eintrag (überall gleich): Übernehmen (Vorschlag ausführen), Aufgabe (Fälligkeit, nach To Do), Termin (Datum plus Uhrzeit, in den Kalender), Verschieben (+1 Tag, nächste Woche, Datum wählen), Ablegen (kein Datum, nur noch in der Suche), Erledigt, Bearbeiten, Löschen.
+Aktionen pro Eintrag: Übernehmen (Vorschlag ausführen, nur bei Einträgen im Eingang, die auch wirklich einen Vorschlag haben), Aufgabe (Fälligkeit, nach To Do), Termin (Datum plus Uhrzeit, in den Kalender), Verschieben (+1 Tag, nächste Woche, Datum wählen), Ablegen (kein Datum, nur noch in der Suche), Erledigt, Bearbeiten, Löschen. Die übrigen sieben stehen in jeder Ansicht über das Aktionen-Menü bereit.
 
 Abgleich mit Outlook: Änderungen in der App gehen sofort nach Outlook. Abhaken oder Verschieben in To Do oder Outlook wird alle 15 Minuten in die App übernommen. Bei Konflikt gewinnt die zuletzt geänderte Seite.
 
@@ -106,6 +106,23 @@ Eine Review in einem separaten Chat deckte mehrere echte Bugs auf, alle behoben 
 - Wichtig für künftige Backend-Änderungen: `clasp push` aktualisiert nur den Editor-Stand (HEAD) - die laufende Web-App-Bereitstellung bleibt auf ihrer festen Version stehen, bis sie über "Bereitstellen → Bereitstellungen verwalten → Neue Version" neu bereitgestellt wird. Zeit-Trigger sind davon unabhängig und laufen immer auf dem aktuellen Editor-Stand.
 - Getestet und bestätigt: Aufgabe aus dem Eingang übernommen erscheint innerhalb von Sekunden in To Do auf Handy und PC, Abhaken in To Do setzt den Eintrag in der App nach manuellem `outlookAbgleichen()` (bzw. spätestens nach 15 Minuten) auf erledigt, Termin erscheint im Outlook-Kalender "Notizen" mit Erinnerung 30 Minuten vorher, Outlook-Symbol erscheint in der PWA bei verknüpften Einträgen.
 - Bekannt/hingenommen (geringer Nutzen für den Aufwand in einer Einzelnutzer-App): kein Zurücksetzen von dueDateTime/Erinnerung in Outlook, wenn Datum im Sheet wieder geleert wird (Ablegen); Abgleich liest maximal die ersten 200 Aufgaben/Termine (keine Pagination); Abgleich-Trigger muss nach dieser Session einmalig per `outlookTriggerEinrichten()` gesetzt werden (nicht automatisch bei jedem Deployment).
+
+### Nachbesserung nach zweiter Review (16. September) — erledigt
+
+Vollständige Review von Backend und PWA in einer eigenen Session. Behoben:
+
+- **Kritisch: Die Offline-Warteschlange verwarf gepufferte Notizen bei jedem fachlichen Fehler.** Die erste Nachbesserungsrunde hatte "blockiert für immer" korrekt beseitigt, war dabei aber ins andere Extrem gekippt: Alles, was kein `fetch`-Netzfehler war, wurde sofort gelöscht. Dazu zählen auch vorübergehende Zustände - Apps-Script-Kontingent oder HTML-Fehlerseite, `doPost`-Fehler wie ein Lock-Timeout, ein gerade gewechselter Schlüssel, oder fehlende Zugangsdaten beim App-Start. Der Rohtext einer diktierten Notiz existiert an dieser Stelle nirgends sonst. Jetzt: Zähler `versuche` am Warteschlangen-Eintrag, `MAX_VERSUCHE = 3`, danach aufgeben - und bei einer Notiz den Text zurück ins Eingabefeld unter "Neu" schreiben statt ihn wegzuwerfen. Netzfehler verbrauchen weiterhin keinen Versuch und halten die Reihenfolge. Fehlen URL oder Schlüssel, beginnt der Abgleich gar nicht erst.
+- **Kritisch: `erfassen` und `liste` lieferten Datumswerte in unterschiedlichen Formaten.** `verarbeite()` gab rohe `Date`-Objekte zurück, die `JSON.stringify` als UTC serialisiert ("2026-09-21T22:00:00.000Z" für den 22.09.), während `zeileZuObjekt_` Berliner Ortszeit liefert. Die PWA schneidet für ihre Tagesfilter und das Bearbeiten-Formular die ersten zehn Zeichen ab und lag damit bei frisch erfassten Notizen einen Tag daneben: Der Eintrag fehlte in Heute/Woche, und ein Speichern im Bearbeiten-Formular ohne Anfassen des Datumsfeldes schrieb den Vortag ins Sheet und nach Outlook. Jetzt laufen beide Wege über `feldwertFuerAntwort_`/`objektFuerAntwort_` in Liste.js.
+- Geleertes Datum zog einen verknüpften Outlook-Termin stillschweigend auf heute (`outlookTerminKoerper_` hatte einen `|| heute`-Rückfall). Beim Aktualisieren werden `start`/`end` jetzt weggelassen, wenn kein Datum da ist - der Termin bleibt stehen, so wie es `outlookAufgabeKoerper_` mit `dueDateTime` ohnehin schon machte. Beim Anlegen bleibt der Rückfall, Graph braucht dort eine Startzeit.
+- Fehlgeschlagene Outlook-*Aktualisierungen* wurden nie wiederholt: Anders als beim Anlegen (leere Outlook_ID als Marker) ändert sich bei einem gescheiterten PATCH Outlooks `lastModifiedDateTime` nicht, der 15-Minuten-Abgleich sah also nichts, und Sheet und Outlook liefen still auseinander. Neu: Nachholliste in der Script-Eigenschaft `OUTLOOK_NACHHOLEN` (Einträge `{id, v}`), die `outlookAbgleichen()` vorweg abarbeitet; nach `OUTLOOK_NACHHOLEN_VERSUCHE = 8` Anläufen (rund zwei Stunden) wird aufgegeben und das über `outlookLetzterFehler()` gemeldet. Ein 404/410 beim PATCH (Element in Outlook von Hand gelöscht) löst zusätzlich die Verknüpfung im Sheet, damit der nächste Versuch ein frisches Element anlegt.
+- Der Outlook-Rücksync setzte `abgelegt` und `prüfen` auf `offen` zurück, sobald in To Do irgendetwas geändert wurde (Titel, Notiz, Priorität). `outlookAufgabeAlsFelder_` schaltet jetzt nur noch zwischen `erledigt` und `offen` um und lässt jeden anderen Status in Ruhe.
+- `fertig()` leerte das Textfeld, bevor die Notiz gepuffert war - schlug `warteschlangeHinzufuegen` fehl (IndexedDB blockiert oder nicht nutzbar), war sie ohne Meldung weg. Jetzt abgefangen, Text kommt zurück ins Feld. Dieselbe Absicherung für die beiden Stellen, die Aktionen puffern.
+- Die Migration in SheetSetup.js hängte eine Spalte ans Ende, wenn sie ihren Anker nicht fand. Das Ergebnis war eine Kopfzeile, die `notizenHeaderPruefen_` nie akzeptiert - jeder doPost-Aufruf scheiterte, und `einrichtenSheet()` konnte es nicht mehr reparieren. Jetzt bricht die Migration an dieser Stelle mit Ist-/Soll-Kopfzeile ab und prüft am Ende zusätzlich das Gesamtergebnis.
+- Kostendeckel: `MAX_ERFASSEN_PRO_TAG = 200` (Script-Eigenschaft `ERFASSEN_ZAEHLER`). Darüber wird die Notiz nur noch als Rohtext mit Status "prüfen" gespeichert, es entstehen keine Tokenkosten mehr. Schützt das Monatsbudget, falls der Schlüssel abhandenkommt oder die PWA in eine Sendeschleife gerät.
+- Test.js: `TESTS_AKTIV = false` als Sicherung. Seit Session 5 sind die Outlook-Aufrufe keine Stubs mehr - `testAktionen()` legt echte Aufgaben und Termine an. Zum Ausführen die Konstante auf true setzen, danach zurück.
+- Kleinere Fixes: `idPruefen_` in Code.js (eine leere ID hätte über `Number('') === 0` eine Zeile mit leerer ID-Zelle treffen können, `findeZeileNachId_` überspringt solche Zellen jetzt ebenfalls); `doPost` fängt einen Aufruf ohne Body ab; Schlüsselvergleich ohne frühzeitigen Abbruch; ungültiger Status/Typ wird in `eintragFelderSetzen_` gemeldet statt still übersprungen; `Math.max` → `Math.min` in `spalteAlsTextFormatieren_` (warf bei Blättern unter 1000 Zeilen); Sortierung nach `Erstellt` läuft bei leerem Wert nicht mehr auf NaN; `verarbeite()` prüft das Notizen-Blatt, weil sonst auch der Rohtext-Fallback scheitert; IndexedDB-Verbindungen werden wieder geschlossen; die optimistischen Feldnamen für Aufgabe/Termin heißen jetzt wie im Sheet (`Datum`/`Uhrzeit` statt `datum`/`uhrzeit`); toter Statuswert `wartend` entfernt. PWA auf Version 2.6.
+- Geprüft und unauffällig: keine XSS-Fläche in der PWA (alle vier `innerHTML`-Zuweisungen sind statische Literale, alle Sheet-Daten gehen über `textContent`, CSP ohne Inline-Skripte), keine Secrets im Repository, `klartext_()` greift an allen Schreibstellen, die Spaltenzuordnung nach der Migration stimmt für den dokumentierten Ausgangszustand, alle Aktionsnamen und `felder`-Schlüssel decken sich zwischen PWA und Backend, der Datums-Round-Trip zu Graph ist symmetrisch.
+- Weiterhin bekannt/hingenommen: kein Zurücksetzen von `dueDateTime`/Erinnerung in Outlook beim Ablegen (der Termin wird jetzt immerhin nicht mehr verschoben); Abgleich liest maximal die ersten 200 Aufgaben/Termine ohne Pagination; keine Längenprüfung bei Bearbeiten-Feldern und Suchwert; Person/Projekt-Filter-Cache in der PWA wird nie aufgeräumt; Test.js bleibt im Produktivprojekt ausgerollt (jetzt aber standardmäßig inaktiv); `frame-ancestors` lässt sich per `<meta>`-CSP auf GitHub Pages nicht setzen.
 
 ### Session 6: Feinschliff
 

@@ -48,7 +48,9 @@ var NOTIZEN_TEXTSPALTEN = ['Titel', 'Person', 'Projekt', 'Uhrzeit', 'Kurzfassung
 function spalteAlsTextFormatieren_(sheet, header, spaltenName) {
   var index = header.indexOf(spaltenName);
   if (index === -1) return;
-  sheet.getRange(1, index + 1, Math.max(sheet.getMaxRows(), 1000), 1).setNumberFormat('@');
+  // min, nicht max: getRange() wirft "out of bounds", sobald mehr Zeilen angefordert
+  // werden als das Blatt hat (z.B. wenn leere Zeilen von Hand entfernt wurden).
+  sheet.getRange(1, index + 1, Math.min(sheet.getMaxRows(), 1000), 1).setNumberFormat('@');
 }
 
 function notizenDatenmodellMigrieren_(ss) {
@@ -80,9 +82,15 @@ function notizenDatenmodellMigrieren_(ss) {
 
     var nachIndex = header.indexOf(spalte.nach); // 0-basiert
     if (nachIndex === -1) {
-      // Anker unerwartet nicht gefunden -> sicherheitshalber ans Ende, nichts verlieren.
-      notizen.getRange(1, notizen.getLastColumn() + 1).setValue(spalte.name);
-      return;
+      // Früher wurde die Spalte hier ans Ende gehängt. Das Ergebnis war eine Kopfzeile,
+      // die notizenHeaderPruefen_ nie akzeptiert - also jeder spätere doPost-Aufruf
+      // abbricht und die App vollständig steht, ohne dass einrichtenSheet() das noch
+      // reparieren könnte (die Spalte gilt beim zweiten Lauf als "bereits vorhanden").
+      // Deshalb lieber hier abbrechen, mit allem, was zum Nachbessern nötig ist.
+      throw new Error('Migration abgebrochen: Ankerspalte "' + spalte.nach + '" fehlt.' +
+        '\nKopfzeile ist:  ' + header.join(' | ') +
+        '\nErwartet wird: ' + SPALTEN_NOTIZEN.join(' | ') +
+        '\nBitte die Kopfzeile im Blatt "' + SHEET_NOTIZEN + '" von Hand angleichen und erneut ausführen.');
     }
     notizen.insertColumnAfter(nachIndex + 1);
     notizen.getRange(1, nachIndex + 2).setValue(spalte.name);
@@ -94,6 +102,18 @@ function notizenDatenmodellMigrieren_(ss) {
 
   var aktuellerHeader = notizen.getRange(1, 1, 1, notizen.getLastColumn()).getValues()[0];
   NOTIZEN_TEXTSPALTEN.forEach(function (spalte) { spalteAlsTextFormatieren_(notizen, aktuellerHeader, spalte); });
+
+  // Abschlussprüfung: alles, was hier nicht passt (überzählige oder umbenannte Altspalten,
+  // die die Migration nicht kennt), würde sonst erst später auffallen - dann aber bei
+  // jedem einzelnen Aufruf aus der PWA statt beim bewussten Ausführen von einrichtenSheet().
+  var passt = aktuellerHeader.length >= SPALTEN_NOTIZEN.length &&
+    SPALTEN_NOTIZEN.every(function (spalte, i) { return aktuellerHeader[i] === spalte; });
+  if (!passt) {
+    throw new Error('Migration ergab keine gültige Kopfzeile.' +
+      '\nIst:      ' + aktuellerHeader.join(' | ') +
+      '\nErwartet: ' + SPALTEN_NOTIZEN.join(' | ') +
+      '\nBitte überzählige oder umbenannte Spalten im Blatt "' + SHEET_NOTIZEN + '" von Hand korrigieren.');
+  }
 
   return notizen;
 }

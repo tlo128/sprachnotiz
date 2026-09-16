@@ -46,9 +46,16 @@ function listeAbrufen_(filter, wert) {
       return da < db ? -1 : da > db ? 1 : 0;
     });
   } else {
-    gefiltert.sort(function (a, b) { return new Date(b.Erstellt) - new Date(a.Erstellt); });
+    gefiltert.sort(function (a, b) { return zeitwert_(b.Erstellt) - zeitwert_(a.Erstellt); });
   }
   return gefiltert;
+}
+
+// Ein leeres/ungültiges Erstellt darf den Vergleich nicht auf NaN laufen lassen (das ergibt
+// eine undefinierte Sortierreihenfolge) - solche Zeilen landen hinten.
+function zeitwert_(text) {
+  var zeit = new Date(text).getTime();
+  return isNaN(zeit) ? 0 : zeit;
 }
 
 // Abgelegtes und Erledigtes taucht nur noch in der Suche auf, nicht unter Heute/Woche.
@@ -67,13 +74,34 @@ function alleZeilenAlsObjekte_(sheet) {
   return werte.map(zeileZuObjekt_);
 }
 
+/**
+ * Datumswerte einheitlich als Berliner Ortszeit-ISO ausgeben.
+ *
+ * WICHTIG: Jede Antwort an die PWA muss hier durch. Ein rohes Date-Objekt würde von
+ * JSON.stringify als UTC serialisiert ("2026-09-21T22:00:00.000Z" für den 22.09.) - die
+ * PWA schneidet für ihre Tagesfilter und das Bearbeiten-Formular aber die ersten zehn
+ * Zeichen ab und käme damit auf den Vortag.
+ */
+function feldwertFuerAntwort_(wert) {
+  return (wert instanceof Date)
+    ? Utilities.formatDate(wert, 'Europe/Berlin', "yyyy-MM-dd'T'HH:mm:ss")
+    : wert;
+}
+
+// Für Objekte, die nicht aus einer Sheet-Zeile stammen, sondern beim Schreiben entstehen
+// (Verarbeiten.js) - gleiche Formatierung wie beim Lesen.
+function objektFuerAntwort_(objekt) {
+  var kopie = {};
+  Object.keys(objekt).forEach(function (schluessel) {
+    kopie[schluessel] = feldwertFuerAntwort_(objekt[schluessel]);
+  });
+  return kopie;
+}
+
 function zeileZuObjekt_(zeile) {
   var obj = {};
   SPALTEN_NOTIZEN.forEach(function (spalte, i) {
-    var wert = zeile[i];
-    obj[spalte] = (wert instanceof Date)
-      ? Utilities.formatDate(wert, 'Europe/Berlin', "yyyy-MM-dd'T'HH:mm:ss")
-      : wert;
+    obj[spalte] = feldwertFuerAntwort_(zeile[i]);
   });
   return obj;
 }

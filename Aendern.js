@@ -18,11 +18,17 @@ function eintraegeLoeschen_(ids) {
 }
 
 function findeZeileNachId_(sheet, id) {
+  var gesucht = Number(id);
+  // Leere ID-Zellen und eine leere/ungültige Suchvorgabe ergeben über Number() beide 0 -
+  // ohne diese Prüfung könnte ein Aufruf ohne ID die erste unvollständige Zeile treffen.
+  if (!isFinite(gesucht) || gesucht <= 0) return -1;
+
   var letzteZeile = sheet.getLastRow();
   if (letzteZeile < 2) return -1;
   var idSpalte = sheet.getRange(2, 1, letzteZeile - 1, 1).getValues();
   for (var i = 0; i < idSpalte.length; i++) {
-    if (Number(idSpalte[i][0]) === Number(id)) return i + 2;
+    if (String(idSpalte[i][0]).trim() === '') continue;
+    if (Number(idSpalte[i][0]) === gesucht) return i + 2;
   }
   return -1;
 }

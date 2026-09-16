@@ -131,8 +131,14 @@ function eintragFelderSetzen_(id, felder, eingangSchliessen) {
       var spaltenIndex = SPALTEN_NOTIZEN.indexOf(feldName) + 1;
       if (spaltenIndex < 1) return;
       var wert = alleFelder[feldName];
-      if (feldName === 'Status' && STATUS_WERTE.indexOf(wert) === -1) return;
-      if (feldName === 'Typ' && TYP_WERTE.indexOf(wert) === -1) return;
+      // Früher wurde ein ungültiger Wert still übersprungen - die PWA bekam ok:true und
+      // einen unveränderten Eintrag zurück, ohne dass jemand den Fehler bemerkt hätte.
+      if (feldName === 'Status' && STATUS_WERTE.indexOf(wert) === -1) {
+        throw new Error('Ungültiger Status: ' + JSON.stringify(wert));
+      }
+      if (feldName === 'Typ' && TYP_WERTE.indexOf(wert) === -1) {
+        throw new Error('Ungültiger Typ: ' + JSON.stringify(wert));
+      }
       if ((feldName === 'Datum' || feldName === 'Erinnerungsdatum') && !(wert instanceof Date)) {
         wert = datumAusText_(wert);
       }

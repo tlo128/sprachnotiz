@@ -39,6 +39,11 @@ function uhrzeitAusText_(text) {
 function verarbeite(text, zeitstempel, clientId) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var notizen = ss.getSheetByName(SHEET_NOTIZEN);
+  // Ohne dieses Blatt greift auch der Rohtext-Fallback nicht mehr - dann lieber sofort und
+  // deutlich scheitern. Fehlende Personen/Projekte-Blätter fängt der Fallback dagegen ab.
+  if (!notizen) {
+    throw new Error('Blatt "' + SHEET_NOTIZEN + '" fehlt. Bitte einrichtenSheet() im Editor ausführen.');
+  }
   var personen = ss.getSheetByName(SHEET_PERSONEN);
   var projekte = ss.getSheetByName(SHEET_PROJEKTE);
   var jetzt = zeitstempel ? new Date(zeitstempel) : new Date();
@@ -54,6 +59,7 @@ function verarbeite(text, zeitstempel, clientId) {
 
   var geschrieben;
   try {
+    tageslimitPruefenUndZaehlen_();
     geschrieben = verarbeiteMitClaude_(text, jetzt, notizen, personen, projekte);
   } catch (fehler) {
     Logger.log('Verarbeitung fehlgeschlagen, speichere Rohtext: ' + fehler);
@@ -68,6 +74,24 @@ function verarbeite(text, zeitstempel, clientId) {
     }
   }
   return geschrieben;
+}
+
+/**
+ * Zählt die Claude-Läufe pro Tag und bricht oberhalb von MAX_ERFASSEN_PRO_TAG ab. Der
+ * Aufrufer (verarbeite) fängt das wie jeden anderen Fehler ab und speichert die Notiz als
+ * Rohtext mit Status "prüfen" - es geht also nichts verloren, es entstehen nur keine
+ * weiteren Tokenkosten. Schützt das Monatsbudget, falls der geheime Schlüssel abhanden
+ * kommt oder die PWA durch einen Fehler in eine Sendeschleife gerät.
+ */
+function tageslimitPruefenUndZaehlen_() {
+  var eigenschaften = PropertiesService.getScriptProperties();
+  var heute = Utilities.formatDate(new Date(), 'Europe/Berlin', 'yyyy-MM-dd');
+  var gespeichert = String(eigenschaften.getProperty('ERFASSEN_ZAEHLER') || '').split('|');
+  var anzahl = gespeichert[0] === heute ? (Number(gespeichert[1]) || 0) : 0;
+  if (anzahl >= MAX_ERFASSEN_PRO_TAG) {
+    throw new Error('Tageslimit von ' + MAX_ERFASSEN_PRO_TAG + ' Claude-Aufrufen erreicht - Notiz wird nur als Rohtext gespeichert.');
+  }
+  eigenschaften.setProperty('ERFASSEN_ZAEHLER', heute + '|' + (anzahl + 1));
 }
 
 function verarbeiteMitClaude_(text, jetzt, notizen, personen, projekte) {
@@ -164,7 +188,7 @@ function schreibeEintragZeile_(notizen, personen, projekte, eintrag, originaltex
   };
 
   notizen.appendRow(SPALTEN_NOTIZEN.map(function (spalte) { return klartext_(zeile[spalte]); }));
-  return zeile;
+  return objektFuerAntwort_(zeile);
 }
 
 function schreibeRohtextZeile_(notizen, originaltext, jetzt) {
@@ -198,5 +222,5 @@ function schreibeRohtextZeile_(notizen, originaltext, jetzt) {
   } finally {
     lock.releaseLock();
   }
-  return zeile;
+  return objektFuerAntwort_(zeile);
 }
