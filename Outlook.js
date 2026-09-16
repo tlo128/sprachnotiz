@@ -119,6 +119,18 @@ function outlookEinrichten() {
   Logger.log('Kalender "Notizen": ID ' + outlookKalenderId_());
 }
 
+// Nur zum manuellen Debuggen im Editor: legt direkt eine Testaufgabe an, ohne den
+// try/catch von outlook_erstellen - ein Fehler erscheint dadurch direkt (rot, mit
+// Stacktrace) im Ausführungsprotokoll statt nur geloggt zu werden. Kein Unterstrich
+// am Ende (sonst blendet der Editor die Funktion aus dem Ausführen-Dropdown aus).
+function outlookTestAufgabeErstellen() {
+  var ergebnis = outlookAufgabeErstellen_({
+    ID: 'test', Titel: 'Testaufgabe (kann in To Do gelöscht werden)',
+    Datum: '', Erinnerungsdatum: '', Kurzfassung: '', Projekt: '', Person: '', Status: 'offen'
+  });
+  Logger.log('Erstellt: ' + JSON.stringify(ergebnis));
+}
+
 // Aufruf-Fehler (abgelaufenes Token, Graph kurz nicht erreichbar ...) werden geloggt,
 // nicht geworfen: der Sheet-Eintrag ist zu diesem Zeitpunkt schon geschrieben (siehe
 // outlookSynchronisieren_ in Aktionen.js), das darf durch einen Outlook-Ausfall nicht
@@ -187,8 +199,14 @@ function outlookBeschreibung_(eintrag) {
   return teile.join('\n\n');
 }
 
+// Datum/Erinnerungsdatum kommen aus dem Sheet (zeileZuObjekt_) immer als volles ISO
+// ("2026-09-22T00:00:00"), nicht als reines Datum - erst auf die ersten 10 Zeichen kürzen.
+function outlookNurDatum_(text) {
+  return String(text || '').substring(0, 10);
+}
+
 function outlookGraphZeit_(datumText, uhrzeitText) {
-  return { dateTime: datumText + 'T' + (uhrzeitText || '09:00') + ':00', timeZone: 'Europe/Berlin' };
+  return { dateTime: outlookNurDatum_(datumText) + 'T' + (uhrzeitText || '09:00') + ':00', timeZone: 'Europe/Berlin' };
 }
 
 /* ----- Aufgaben (To Do) ----- */
@@ -238,7 +256,7 @@ function outlookTerminLoeschen_(eintrag) {
 }
 
 function outlookTerminKoerper_(eintrag) {
-  var datum = eintrag.Datum || Utilities.formatDate(new Date(), 'Europe/Berlin', 'yyyy-MM-dd');
+  var datum = outlookNurDatum_(eintrag.Datum) || Utilities.formatDate(new Date(), 'Europe/Berlin', 'yyyy-MM-dd');
   var uhrzeit = eintrag.Uhrzeit || '09:00';
   var start = new Date(datum + 'T' + uhrzeit + ':00');
   var ende = new Date(start.getTime() + TERMIN_DAUER_MINUTEN * 60 * 1000);
