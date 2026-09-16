@@ -292,3 +292,102 @@ function outlookTerminKoerper_(eintrag) {
   if (beschreibung) body.body = { content: beschreibung, contentType: 'text' };
   return body;
 }
+
+/* ----- Abgleich zurück (Outlook -> Sheet), alle 15 Minuten per Trigger ----- */
+
+/**
+ * Einmalig im Editor ausführen: richtet den 15-Minuten-Trigger für outlookAbgleichen
+ * ein. Entfernt vorher gleichnamige Trigger, damit bei mehrfachem Ausführen kein
+ * Duplikat entsteht.
+ */
+function outlookTriggerEinrichten() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === 'outlookAbgleichen') ScriptApp.deleteTrigger(trigger);
+  });
+  ScriptApp.newTrigger('outlookAbgleichen').timeBased().everyMinutes(15).create();
+  Logger.log('Trigger eingerichtet: outlookAbgleichen läuft ab jetzt alle 15 Minuten.');
+}
+
+/**
+ * Liest alle mit Outlook verknüpften Einträge, vergleicht lastModifiedDateTime aus
+ * Outlook mit dem zuletzt bekannten Stand (Outlook_Geaendert) und übernimmt Status/
+ * Datum/Uhrzeit ins Sheet, falls sich seitdem in Outlook etwas geändert hat. Wurde der
+ * Eintrag im selben Zeitraum auch im Sheet geändert (Geaendert), gewinnt die zuletzt
+ * geänderte Seite - Vergleich von Outlooks lastModifiedDateTime gegen Geaendert.
+ */
+function outlookAbgleichen() {
+  var notizen = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NOTIZEN);
+  var verknuepft = alleZeilenAlsObjekte_(notizen).filter(function (e) { return e.Outlook_ID; });
+  if (!verknuepft.length) {
+    Logger.log('Outlook-Abgleich: keine verknüpften Einträge.');
+    return;
+  }
+
+  var aufgaben = outlookAlleAufgaben_();
+  var termine = outlookAlleTermine_();
+  var aktualisiert = 0;
+
+  verknuepft.forEach(function (eintrag) {
+    try {
+      var item = eintrag.Outlook_Typ === 'Aufgabe' ? aufgaben[eintrag.Outlook_ID] : termine[eintrag.Outlook_ID];
+      if (!item || !item.lastModifiedDateTime) return; // in Outlook nicht (mehr) gefunden
+
+      var outlookGeaendert = new Date(item.lastModifiedDateTime);
+      var bekanntSeit = eintrag.Outlook_Geaendert ? new Date(eintrag.Outlook_Geaendert) : new Date(0);
+      if (outlookGeaendert <= bekanntSeit) return; // nichts Neues von Outlook
+
+      var sheetGeaendert = eintrag.Geaendert ? new Date(eintrag.Geaendert) : new Date(0);
+      if (sheetGeaendert > bekanntSeit && sheetGeaendert >= outlookGeaendert) return; // Sheet zuletzt geändert, gewinnt
+
+      var setzen = eintrag.Outlook_Typ === 'Aufgabe' ? outlookAufgabeAlsFelder_(item) : outlookTerminAlsFelder_(item);
+      setzen.Outlook_Geaendert = outlookGeaendert;
+      eintragFelderSetzen_(eintrag.ID, setzen, false);
+      aktualisiert++;
+    } catch (fehler) {
+      Logger.log('Outlook-Abgleich fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler);
+    }
+  });
+
+  Logger.log('Outlook-Abgleich: ' + aktualisiert + ' von ' + verknuepft.length + ' verknüpften Einträgen aus Outlook übernommen.');
+}
+
+function outlookAlleAufgaben_() {
+  var antwort = graphFetch_('/me/todo/lists/' + outlookListeId_() + '/tasks?$top=200&$select=id,status,dueDateTime,lastModifiedDateTime');
+  var karte = {};
+  (antwort.value || []).forEach(function (task) { karte[task.id] = task; });
+  return karte;
+}
+
+function outlookAlleTermine_() {
+  var antwort = graphFetch_('/me/calendars/' + outlookKalenderId_() + '/events?$top=200&$select=id,start,end,lastModifiedDateTime');
+  var karte = {};
+  (antwort.value || []).forEach(function (event) { karte[event.id] = event; });
+  return karte;
+}
+
+// Graph liefert Datums-/Uhrzeitwerte standardmäßig in UTC (timeZone "UTC"), ohne
+// "Z"-Suffix im dateTime-Text - für new Date() erst eindeutig als UTC kennzeichnen,
+// sonst rechnet Apps Script mit der falschen Zeitzone (Datum kann um einen Tag kippen).
+function outlookAlsBerlinerZeit_(graphZeit) {
+  var text = String((graphZeit && graphZeit.dateTime) || '');
+  if (!/[zZ]$|[+-]\d\d:\d\d$/.test(text)) text += 'Z';
+  return new Date(text);
+}
+
+function outlookAufgabeAlsFelder_(task) {
+  var felder = { Status: task.status === 'completed' ? 'erledigt' : 'offen' };
+  if (task.dueDateTime && task.dueDateTime.dateTime) {
+    felder.Datum = Utilities.formatDate(outlookAlsBerlinerZeit_(task.dueDateTime), 'Europe/Berlin', 'yyyy-MM-dd');
+  }
+  return felder;
+}
+
+function outlookTerminAlsFelder_(event) {
+  var felder = {};
+  if (event.start && event.start.dateTime) {
+    var lokal = outlookAlsBerlinerZeit_(event.start);
+    felder.Datum = Utilities.formatDate(lokal, 'Europe/Berlin', 'yyyy-MM-dd');
+    felder.Uhrzeit = Utilities.formatDate(lokal, 'Europe/Berlin', 'HH:mm');
+  }
+  return felder;
+}
