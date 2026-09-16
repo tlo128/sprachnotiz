@@ -1,6 +1,6 @@
 # Sprachnotiz-App, Google-Variante mit Outlook-Anbindung
 
-Stand: 16. September 2026. Ersetzt alle früheren Fassungen. Sessions 1 bis 4 sind umgesetzt und im Betrieb, danach eine Review-Nachbesserungsrunde. Als Nächstes: Session 5 (Outlook-Anbindung).
+Stand: 16. September 2026. Ersetzt alle früheren Fassungen. Sessions 1 bis 5 sind umgesetzt und im Betrieb, dazwischen eine Review-Nachbesserungsrunde. Als Nächstes: Session 6 (Feinschliff).
 
 ## Ziel
 
@@ -64,7 +64,7 @@ Ohne Netz: Textfeld statt Mikrofon, Puffer in IndexedDB, automatisches Nachsende
 
 ## Sessions
 
-Sessions 1 bis 4: erledigt (Backend, PWA, E-Mail-Erinnerung eingeführt und wieder entfernt, Dashboard/Eingang, Notion-Import bewusst ausgelassen).
+Sessions 1 bis 5: erledigt (Backend, PWA, E-Mail-Erinnerung eingeführt und wieder entfernt, Dashboard/Eingang, Outlook-Anbindung, Notion-Import weiterhin bewusst ausgelassen).
 
 ### Session 4: Dashboard und Eingang, E-Mail entfernen — erledigt
 
@@ -95,14 +95,17 @@ Eine Review in einem separaten Chat deckte mehrere echte Bugs auf, alle behoben 
 - Datei claude.md zu CLAUDE.md umbenannt (Großschreibung, case-sensitive Dateisysteme).
 - Bekannt/hingenommen (geringer Nutzen für den Aufwand): keine Längenprüfung bei Bearbeiten-Feldern/Suchwert, Person/Projekt-Filter-Cache in der PWA wird nie aufgeräumt, Test.js bleibt im Produktivprojekt ausgerollt.
 
-### Session 5: Outlook-Anbindung
+### Session 5: Outlook-Anbindung — erledigt
 
-- OAuth2-Bibliothek einbinden, Anmeldefunktion, einmalige Bestätigung im Browser.
-- Liste "Notizen" in To Do und Kalender "Notizen" anlegen, falls nicht vorhanden.
-- Übernehmen, Aufgabe, Termin, Verschieben, Erledigt, Löschen schreiben nach Outlook. Outlook_ID im Sheet.
-- Abgleich-Trigger alle 15 Minuten.
-- PWA zeigt pro Eintrag ein kleines Outlook-Symbol, wenn verknüpft.
-- Fertig, wenn: eine Aufgabe aus dem Eingang übernommen erscheint innerhalb von Sekunden in To Do auf Handy und PC, Abhaken in To Do setzt den Eintrag in der App spätestens nach 15 Minuten auf erledigt, ein Termin erscheint im Outlook-Kalender mit Erinnerung.
+- App-Registrierung in Entra angelegt (Single-Tenant), OAuth2-Bibliothek für Apps Script eingebunden (Script-ID 1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF, im Editor unter "Bibliotheken" hinzugefügt, Eintrag jetzt auch in appsscript.json). Script-Eigenschaften MS_CLIENT_ID, MS_TENANT_ID, MS_CLIENT_SECRET. `autorisieren()` einmalig im Editor ausgeführt, Redirect läuft über die script-eigene usercallback-URL (kein doGet-Routing nötig).
+- `outlookEinrichten()` legt To-Do-Liste "Notizen" und Kalender "Notizen" an, falls nicht vorhanden, merkt sich beide IDs in den Script-Eigenschaften (MS_TODO_LISTE_ID, MS_KALENDER_ID).
+- Outlook.js: outlook_erstellen/aktualisieren/loeschen rufen jetzt wirklich Microsoft Graph auf (To-Do-Tasks bzw. Kalender-Events), aufgerufen aus den bestehenden Aufrufstellen in Aktionen.js (uebernehmen/aufgabe/termin/verschieben/ablegen/erledigt/bearbeiten/loeschen). Outlook_ID/Outlook_Typ/Outlook_Geaendert werden im Sheet nachgezogen. Wechselt ein Eintrag den Typ weg von Aufgabe/Termin, wird die Outlook-Verknüpfung im Sheet mit gelöscht; wechselt er zwischen Aufgabe und Termin während schon verknüpft, wird das alte Outlook-Element gelöscht und passend neu angelegt (Graph kann einen Task nicht zu einem Event "umwandeln"). Fehler beim Outlook-Aufruf werden geloggt (plus `outlookFehlerMerken_`/`outlookLetzterFehler()` als Script-Eigenschaft, praktisch zum Nachsehen nach einem PWA-Aufruf), nicht an die PWA durchgereicht - der Sheet-Eintrag ist zu dem Zeitpunkt schon geschrieben, bei leerer Outlook_ID wird beim nächsten Anfassen automatisch erneut versucht.
+- `outlookAbgleichen()` per Zeit-Trigger alle 15 Minuten (eingerichtet über `outlookTriggerEinrichten()`): vergleicht lastModifiedDateTime aus Outlook mit Outlook_Geaendert, übernimmt Status/Datum/Uhrzeit ins Sheet. Bei Konflikt (Sheet seitdem auch geändert) gewinnt die zuletzt geänderte Seite (Vergleich gegen Geaendert).
+- PWA zeigt ein kleines 🔗-Symbol neben dem Titel, wenn ein Eintrag mit Outlook verknüpft ist (App-Version 2.5).
+- Zwei Bugs beim Testen gefunden und behoben: (1) `clasp push` ohne vorher `clasp pull` hätte eine im Editor manuell hinzugefügte Bibliothek aus appsscript.json wieder entfernt - Bibliothek jetzt im lokalen Manifest festgehalten. (2) Datum/Erinnerungsdatum kommen aus dem Sheet immer als volles ISO ("2026-09-22T00:00:00"), nicht als reines yyyy-MM-dd - die Outlook-Aufrufe hängten daran ein zweites "T..." an, Microsoft Graph lehnte das ab, der Fehler wurde nur geloggt statt aufzufallen (`outlookNurDatum_` behebt das). Ebenso liefert Graph Datumswerte beim Lesen standardmäßig in UTC ohne "Z"-Suffix zurück - `outlookAlsBerlinerZeit_` kennzeichnet das vor der Umrechnung eindeutig, sonst kann das Datum beim Rücklesen um einen Tag kippen.
+- Wichtig für künftige Backend-Änderungen: `clasp push` aktualisiert nur den Editor-Stand (HEAD) - die laufende Web-App-Bereitstellung bleibt auf ihrer festen Version stehen, bis sie über "Bereitstellen → Bereitstellungen verwalten → Neue Version" neu bereitgestellt wird. Zeit-Trigger sind davon unabhängig und laufen immer auf dem aktuellen Editor-Stand.
+- Getestet und bestätigt: Aufgabe aus dem Eingang übernommen erscheint innerhalb von Sekunden in To Do auf Handy und PC, Abhaken in To Do setzt den Eintrag in der App nach manuellem `outlookAbgleichen()` (bzw. spätestens nach 15 Minuten) auf erledigt, Termin erscheint im Outlook-Kalender "Notizen" mit Erinnerung 30 Minuten vorher, Outlook-Symbol erscheint in der PWA bei verknüpften Einträgen.
+- Bekannt/hingenommen (geringer Nutzen für den Aufwand in einer Einzelnutzer-App): kein Zurücksetzen von dueDateTime/Erinnerung in Outlook, wenn Datum im Sheet wieder geleert wird (Ablegen); Abgleich liest maximal die ersten 200 Aufgaben/Termine (keine Pagination); Abgleich-Trigger muss nach dieser Session einmalig per `outlookTriggerEinrichten()` gesetzt werden (nicht automatisch bei jedem Deployment).
 
 ### Session 6: Feinschliff
 
