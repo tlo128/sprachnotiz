@@ -89,7 +89,10 @@ function aktionLoeschen_(id) {
 function outlookSynchronisieren_(eintrag) {
   var syncFaehig = eintrag.Typ === 'Aufgabe' || eintrag.Typ === 'Termin';
   if (!syncFaehig) {
-    if (eintrag.Outlook_ID) outlook_loeschen(eintrag);
+    if (eintrag.Outlook_ID) {
+      outlook_loeschen(eintrag);
+      outlookVerknuepfungLoeschen_(eintrag.ID);
+    }
     return;
   }
   if (eintrag.Outlook_ID) {

@@ -119,17 +119,138 @@ function outlookEinrichten() {
   Logger.log('Kalender "Notizen": ID ' + outlookKalenderId_());
 }
 
-// Platzhalter, folgen im nächsten Schritt dieser Session.
+// Aufruf-Fehler (abgelaufenes Token, Graph kurz nicht erreichbar ...) werden geloggt,
+// nicht geworfen: der Sheet-Eintrag ist zu diesem Zeitpunkt schon geschrieben (siehe
+// outlookSynchronisieren_ in Aktionen.js), das darf durch einen Outlook-Ausfall nicht
+// rückgängig gemacht/als Fehler an die PWA gemeldet werden. Bleibt Outlook_ID leer,
+// wird beim nächsten Anfassen des Eintrags automatisch erneut versucht.
 
 function outlook_erstellen(eintrag) {
-  Logger.log('[Outlook-Stub] erstellen: ID=%s Typ=%s Titel=%s Datum=%s Uhrzeit=%s',
-    eintrag.ID, eintrag.Typ, eintrag.Titel, eintrag.Datum, eintrag.Uhrzeit);
+  try {
+    var ergebnis;
+    if (eintrag.Typ === 'Aufgabe') ergebnis = outlookAufgabeErstellen_(eintrag);
+    else if (eintrag.Typ === 'Termin') ergebnis = outlookTerminErstellen_(eintrag);
+    else return;
+    outlookVerknuepfungSpeichern_(eintrag.ID, ergebnis.id, eintrag.Typ, ergebnis.lastModifiedDateTime);
+  } catch (fehler) {
+    Logger.log('Outlook erstellen fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler);
+  }
 }
 
 function outlook_aktualisieren(eintrag) {
-  Logger.log('[Outlook-Stub] aktualisieren: ID=%s Outlook_ID=%s Status=%s', eintrag.ID, eintrag.Outlook_ID, eintrag.Status);
+  try {
+    if (eintrag.Typ !== eintrag.Outlook_Typ) {
+      // Zwischen Aufgabe und Termin gewechselt, während schon mit Outlook verknüpft:
+      // eine Aufgabe kann nicht zu einem Termin "umgewandelt" werden (und umgekehrt) -
+      // altes Outlook-Element löschen, passendes neu anlegen.
+      outlook_loeschen(eintrag);
+      outlook_erstellen(Object.assign({}, eintrag, { Outlook_ID: '', Outlook_Typ: '' }));
+      return;
+    }
+    var ergebnis = eintrag.Outlook_Typ === 'Aufgabe' ? outlookAufgabeAktualisieren_(eintrag) : outlookTerminAktualisieren_(eintrag);
+    outlookVerknuepfungSpeichern_(eintrag.ID, eintrag.Outlook_ID, eintrag.Outlook_Typ, ergebnis.lastModifiedDateTime);
+  } catch (fehler) {
+    Logger.log('Outlook aktualisieren fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler);
+  }
 }
 
 function outlook_loeschen(eintrag) {
-  Logger.log('[Outlook-Stub] loeschen: ID=%s Outlook_ID=%s', eintrag.ID, eintrag.Outlook_ID);
+  if (!eintrag.Outlook_ID) return;
+  try {
+    if (eintrag.Outlook_Typ === 'Aufgabe') outlookAufgabeLoeschen_(eintrag);
+    else if (eintrag.Outlook_Typ === 'Termin') outlookTerminLoeschen_(eintrag);
+  } catch (fehler) {
+    Logger.log('Outlook löschen fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler);
+  }
+}
+
+function outlookVerknuepfungSpeichern_(id, outlookId, outlookTyp, lastModifiedDateTime) {
+  eintragFelderSetzen_(id, {
+    Outlook_ID: outlookId,
+    Outlook_Typ: outlookTyp,
+    Outlook_Geaendert: lastModifiedDateTime ? new Date(lastModifiedDateTime) : new Date()
+  }, false);
+}
+
+function outlookVerknuepfungLoeschen_(id) {
+  eintragFelderSetzen_(id, { Outlook_ID: '', Outlook_Typ: '', Outlook_Geaendert: '' }, false);
+}
+
+// Kurzfassung plus Projekt und Person als Beschreibungstext für Aufgabe/Termin.
+function outlookBeschreibung_(eintrag) {
+  var teile = [];
+  if (eintrag.Kurzfassung) teile.push(eintrag.Kurzfassung);
+  var zusatz = [];
+  if (eintrag.Projekt) zusatz.push('Projekt: ' + eintrag.Projekt);
+  if (eintrag.Person) zusatz.push('Person: ' + eintrag.Person);
+  if (zusatz.length) teile.push(zusatz.join(' · '));
+  return teile.join('\n\n');
+}
+
+function outlookGraphZeit_(datumText, uhrzeitText) {
+  return { dateTime: datumText + 'T' + (uhrzeitText || '09:00') + ':00', timeZone: 'Europe/Berlin' };
+}
+
+/* ----- Aufgaben (To Do) ----- */
+
+function outlookAufgabeErstellen_(eintrag) {
+  return graphFetch_('/me/todo/lists/' + outlookListeId_() + '/tasks', 'post', outlookAufgabeKoerper_(eintrag));
+}
+
+function outlookAufgabeAktualisieren_(eintrag) {
+  return graphFetch_('/me/todo/lists/' + outlookListeId_() + '/tasks/' + eintrag.Outlook_ID, 'patch', outlookAufgabeKoerper_(eintrag));
+}
+
+function outlookAufgabeLoeschen_(eintrag) {
+  graphFetch_('/me/todo/lists/' + outlookListeId_() + '/tasks/' + eintrag.Outlook_ID, 'delete');
+}
+
+function outlookAufgabeKoerper_(eintrag) {
+  var body = {
+    title: eintrag.Titel || '(ohne Titel)',
+    status: eintrag.Status === 'erledigt' ? 'completed' : 'notStarted'
+  };
+  if (eintrag.Datum) body.dueDateTime = outlookGraphZeit_(eintrag.Datum, '00:00');
+  if (eintrag.Erinnerungsdatum) {
+    body.reminderDateTime = outlookGraphZeit_(eintrag.Erinnerungsdatum, '09:00');
+    body.isReminderOn = true;
+  }
+  var beschreibung = outlookBeschreibung_(eintrag);
+  if (beschreibung) body.body = { content: beschreibung, contentType: 'text' };
+  return body;
+}
+
+/* ----- Termine (Kalender) ----- */
+
+var TERMIN_DAUER_MINUTEN = 60;
+var TERMIN_ERINNERUNG_MINUTEN = 30;
+
+function outlookTerminErstellen_(eintrag) {
+  return graphFetch_('/me/calendars/' + outlookKalenderId_() + '/events', 'post', outlookTerminKoerper_(eintrag));
+}
+
+function outlookTerminAktualisieren_(eintrag) {
+  return graphFetch_('/me/calendars/' + outlookKalenderId_() + '/events/' + eintrag.Outlook_ID, 'patch', outlookTerminKoerper_(eintrag));
+}
+
+function outlookTerminLoeschen_(eintrag) {
+  graphFetch_('/me/calendars/' + outlookKalenderId_() + '/events/' + eintrag.Outlook_ID, 'delete');
+}
+
+function outlookTerminKoerper_(eintrag) {
+  var datum = eintrag.Datum || Utilities.formatDate(new Date(), 'Europe/Berlin', 'yyyy-MM-dd');
+  var uhrzeit = eintrag.Uhrzeit || '09:00';
+  var start = new Date(datum + 'T' + uhrzeit + ':00');
+  var ende = new Date(start.getTime() + TERMIN_DAUER_MINUTEN * 60 * 1000);
+
+  var body = {
+    subject: eintrag.Titel || '(ohne Titel)',
+    start: { dateTime: datum + 'T' + uhrzeit + ':00', timeZone: 'Europe/Berlin' },
+    end: { dateTime: Utilities.formatDate(ende, 'Europe/Berlin', "yyyy-MM-dd'T'HH:mm:ss"), timeZone: 'Europe/Berlin' },
+    isReminderOn: true,
+    reminderMinutesBeforeStart: TERMIN_ERINNERUNG_MINUTEN
+  };
+  var beschreibung = outlookBeschreibung_(eintrag);
+  if (beschreibung) body.body = { content: beschreibung, contentType: 'text' };
+  return body;
 }
