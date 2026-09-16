@@ -124,9 +124,10 @@ function outlookEinrichten() {
 // Stacktrace) im Ausführungsprotokoll statt nur geloggt zu werden. Kein Unterstrich
 // am Ende (sonst blendet der Editor die Funktion aus dem Ausführen-Dropdown aus).
 function outlookTestAufgabeErstellen() {
+  // Datum bewusst wie zeileZuObjekt_ es liefert (volles ISO), um den echten Ablauf nachzustellen.
   var ergebnis = outlookAufgabeErstellen_({
-    ID: 'test', Titel: 'Testaufgabe (kann in To Do gelöscht werden)',
-    Datum: '', Erinnerungsdatum: '', Kurzfassung: '', Projekt: '', Person: '', Status: 'offen'
+    ID: 'test', Titel: 'Testaufgabe mit Datum (kann in To Do gelöscht werden)',
+    Datum: '2026-09-22T00:00:00', Erinnerungsdatum: '', Kurzfassung: 'Testnotiz', Projekt: '', Person: '', Status: 'offen'
   });
   Logger.log('Erstellt: ' + JSON.stringify(ergebnis));
 }
@@ -142,10 +143,13 @@ function outlook_erstellen(eintrag) {
     var ergebnis;
     if (eintrag.Typ === 'Aufgabe') ergebnis = outlookAufgabeErstellen_(eintrag);
     else if (eintrag.Typ === 'Termin') ergebnis = outlookTerminErstellen_(eintrag);
-    else return;
+    else { outlookFehlerMerken_('outlook_erstellen: ID ' + eintrag.ID + ' hat Typ "' + eintrag.Typ + '", weder Aufgabe noch Termin - übersprungen.'); return; }
     outlookVerknuepfungSpeichern_(eintrag.ID, ergebnis.id, eintrag.Typ, ergebnis.lastModifiedDateTime);
+    outlookFehlerMerken_('OK: erstellen ID ' + eintrag.ID + ' -> Outlook-ID ' + ergebnis.id);
   } catch (fehler) {
-    Logger.log('Outlook erstellen fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler);
+    var nachricht = 'Outlook erstellen fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler;
+    Logger.log(nachricht);
+    outlookFehlerMerken_(nachricht);
   }
 }
 
@@ -161,8 +165,11 @@ function outlook_aktualisieren(eintrag) {
     }
     var ergebnis = eintrag.Outlook_Typ === 'Aufgabe' ? outlookAufgabeAktualisieren_(eintrag) : outlookTerminAktualisieren_(eintrag);
     outlookVerknuepfungSpeichern_(eintrag.ID, eintrag.Outlook_ID, eintrag.Outlook_Typ, ergebnis.lastModifiedDateTime);
+    outlookFehlerMerken_('OK: aktualisieren ID ' + eintrag.ID);
   } catch (fehler) {
-    Logger.log('Outlook aktualisieren fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler);
+    var nachricht = 'Outlook aktualisieren fehlgeschlagen (ID ' + eintrag.ID + '): ' + fehler;
+    Logger.log(nachricht);
+    outlookFehlerMerken_(nachricht);
   }
 }
 
@@ -186,6 +193,19 @@ function outlookVerknuepfungSpeichern_(id, outlookId, outlookTyp, lastModifiedDa
 
 function outlookVerknuepfungLoeschen_(id) {
   eintragFelderSetzen_(id, { Outlook_ID: '', Outlook_Typ: '', Outlook_Geaendert: '' }, false);
+}
+
+// Merkt sich Erfolg/Misserfolg des letzten Outlook-Sync-Versuchs (auch aus einem
+// doPost-Aufruf der PWA, wo Logger.log-Ausgaben nicht bequem einsehbar sind).
+// outlookLetzterFehler im Editor ausführen, um nachzusehen.
+function outlookFehlerMerken_(nachricht) {
+  try {
+    PropertiesService.getScriptProperties().setProperty('OUTLOOK_LETZTES_ERGEBNIS', new Date().toISOString() + ' - ' + nachricht);
+  } catch (e) { /* Speichern des Debug-Hinweises darf nie die eigentliche Aktion stören */ }
+}
+
+function outlookLetzterFehler() {
+  Logger.log(PropertiesService.getScriptProperties().getProperty('OUTLOOK_LETZTES_ERGEBNIS') || '(noch kein Outlook-Sync-Versuch gespeichert)');
 }
 
 // Kurzfassung plus Projekt und Person als Beschreibungstext für Aufgabe/Termin.
