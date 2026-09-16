@@ -48,7 +48,78 @@ function outlookAuthCallback_(request) {
     : 'Verbindung fehlgeschlagen. Bitte autorisieren() erneut ausführen.');
 }
 
-// Platzhalter, folgen in einem der nächsten Schritte dieser Session.
+/**
+ * Ruft die Microsoft Graph API auf (Bearer-Token aus der OAuth2-Bibliothek).
+ * @param {string} pfad Pfad ab GRAPH_BASE_URL, z.B. "/me/todo/lists".
+ * @param {string} [methode] 'get' (Standard), 'post', 'patch', 'delete'.
+ * @param {Object} [payload] Wird als JSON-Body mitgeschickt, falls angegeben.
+ */
+function graphFetch_(pfad, methode, payload) {
+  var service = outlookService_();
+  if (!service.hasAccess()) {
+    throw new Error('Nicht mit Outlook verbunden. Bitte autorisieren() im Editor ausführen.');
+  }
+  var optionen = {
+    method: methode || 'get',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + service.getAccessToken() },
+    muteHttpExceptions: true
+  };
+  if (payload !== undefined) optionen.payload = JSON.stringify(payload);
+
+  var antwort = UrlFetchApp.fetch(GRAPH_BASE_URL + pfad, optionen);
+  var code = antwort.getResponseCode();
+  var text = antwort.getContentText();
+  var body = text ? JSON.parse(text) : {};
+
+  if (code < 200 || code >= 300) {
+    throw new Error('Microsoft Graph Fehler (' + code + '): ' + (body.error && body.error.message ? body.error.message : text));
+  }
+  return body;
+}
+
+// IDs der To-Do-Liste/des Kalenders "Notizen" werden nach dem ersten Auflösen in den
+// Script-Eigenschaften gemerkt, damit nicht bei jeder Aktion erst die Liste aller
+// Listen/Kalender abgefragt werden muss.
+function outlookListeId_() {
+  var eigenschaften = PropertiesService.getScriptProperties();
+  var id = eigenschaften.getProperty('MS_TODO_LISTE_ID');
+  if (id) return id;
+
+  var listen = graphFetch_('/me/todo/lists?$top=100').value || [];
+  var gefunden = listen.filter(function (l) { return l.displayName === 'Notizen'; })[0];
+  if (!gefunden) {
+    gefunden = graphFetch_('/me/todo/lists', 'post', { displayName: 'Notizen' });
+  }
+  eigenschaften.setProperty('MS_TODO_LISTE_ID', gefunden.id);
+  return gefunden.id;
+}
+
+function outlookKalenderId_() {
+  var eigenschaften = PropertiesService.getScriptProperties();
+  var id = eigenschaften.getProperty('MS_KALENDER_ID');
+  if (id) return id;
+
+  var kalender = graphFetch_('/me/calendars?$top=100').value || [];
+  var gefunden = kalender.filter(function (k) { return k.name === 'Notizen'; })[0];
+  if (!gefunden) {
+    gefunden = graphFetch_('/me/calendars', 'post', { name: 'Notizen' });
+  }
+  eigenschaften.setProperty('MS_KALENDER_ID', gefunden.id);
+  return gefunden.id;
+}
+
+/**
+ * Einmalig im Editor ausführen (nach autorisieren()): legt die To-Do-Liste und den
+ * Kalender "Notizen" an, falls sie noch nicht existieren, und merkt sich die IDs in
+ * den Script-Eigenschaften.
+ */
+function outlookEinrichten() {
+  Logger.log('To-Do-Liste "Notizen": ID ' + outlookListeId_());
+  Logger.log('Kalender "Notizen": ID ' + outlookKalenderId_());
+}
+
+// Platzhalter, folgen im nächsten Schritt dieser Session.
 
 function outlook_erstellen(eintrag) {
   Logger.log('[Outlook-Stub] erstellen: ID=%s Typ=%s Titel=%s Datum=%s Uhrzeit=%s',
