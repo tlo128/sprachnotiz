@@ -1,6 +1,6 @@
 # Sprachnotiz-App, Google-Variante mit Outlook-Anbindung
 
-Stand: 15. September 2026. Ersetzt alle früheren Fassungen. Sessions 1 bis 4 sind umgesetzt und im Betrieb. Als Nächstes: Session 5 (Outlook-Anbindung).
+Stand: 16. September 2026. Ersetzt alle früheren Fassungen. Sessions 1 bis 4 sind umgesetzt und im Betrieb, danach eine Review-Nachbesserungsrunde. Als Nächstes: Session 5 (Outlook-Anbindung).
 
 ## Ziel
 
@@ -75,8 +75,25 @@ Sessions 1 bis 4: erledigt (Backend, PWA, E-Mail-Erinnerung eingeführt und wied
 - PWA zum Dashboard umgebaut: Tabs Neu/Eingang/Heute/Woche/Suche, Projekt/Person weiterhin über anklickbare Chips erreichbar. Jede Karte zeigt bei offenem Eingang den KI-Vorschlag als Text plus großem "Übernehmen"-Button und "Andere Aktion" daneben. Alle sieben Aktionen über ein Bottom-Sheet-Menü, dazu Wischgesten auf dem Handy (rechts = übernehmen/erledigt, links = Menü), Buttons bleiben überall zusätzlich nutzbar (PC-Fallback).
 - Offline-Puffer (IndexedDB) gilt jetzt für alle Aktionen, nicht nur fürs Erfassen: neues Feld "typ" (erfassen/aktion) in der Warteschlange, optimistische Kartenaktualisierung, automatisches Nachsenden beim Online-Gehen.
 - Manueller "Jetzt aktualisieren"-Button im Header (sendet Warteschlange, lädt die aktuell sichtbare Liste neu) plus "Aktualisiert HH:MM"-Anzeige, weil bei PC+Handy-Nutzung parallel unklar war, wie aktuell die Ansicht ist.
-- Web-App-Deployment lief in Session 4 mehrfach auf dieselbe Deployment-ID neu aus (aktuell Version 3), PWA auf GitHub Pages aktuell Version 2.2.
+- Web-App-Deployment lief in Session 4 mehrfach auf dieselbe Deployment-ID neu aus, PWA auf GitHub Pages mehrfach neu veröffentlicht.
 - Getestet und bestätigt: neue Notiz erscheint im Eingang mit passendem Vorschlag, Übernehmen/Verschieben/Abhaken funktionieren auf Galaxy und PC, im Flugmodus abgehakte Einträge werden nachgesendet, kein E-Mail-Trigger mehr vorhanden, Refresh-Button auf beiden Geräten bestätigt.
+
+### Nachbesserung nach externer Code-Review (16. September) — erledigt
+
+Eine Review in einem separaten Chat deckte mehrere echte Bugs auf, alle behoben und getestet:
+
+- Kritisch: Offline-Warteschlange blockierte dauerhaft bei jedem fachlichen Fehler (nicht nur Netzfehlern) - ein einzelner permanent scheiternder Eintrag verhinderte für immer, dass spätere Notizen/Aktionen nachgesendet wurden. Jetzt unterscheidet die Warteschlange Netzfehler (Reihenfolge bleibt, später erneut versuchen) von fachlichen Fehlern (werden entfernt und gemeldet).
+- "Rohtext immer speichern" griff nicht bei leerem Claude-Ergebnis oder Fehlern nach dem Haiku-Aufruf (Sonnet-Routing, Lock-Timeout) - verarbeite() fängt jetzt die gesamte Pipeline ab.
+- Idempotenz gegen doppelte Notizen/Kosten bei abgebrochener Antwort: clientId pro Erfassungsversuch, serverseitig per CacheService dedupliziert (6h-Fenster).
+- ID-Vergabe auf persistenten Zähler in den Script-Eigenschaften umgestellt (war zuvor "letzte Zeile + 1", kollisionsanfällig bei gelöschter letzter Zeile oder manuell umsortiertem Sheet).
+- "+1 Tag"/"Nächste Woche" rechnen jetzt vom Eintragsdatum statt vom heutigen Datum.
+- Aufgabe/Termin aus dem Aktionen-Menü ohne vorhandenes Datum öffnen jetzt das Bearbeiten-Formular statt leere Felder zu senden.
+- Formel-Injektion und Uhrzeit-Spalte als Zeitwert (Sheets wandelte "14:00" sonst um): führendes Apostroph beim Schreiben erzwingt Klartext - `klartext_()` in Config.js, angewendet in Verarbeiten.js, Aktionen.js, Namenslisten.js. `setNumberFormat('@')` allein reicht bei per API geschriebenen Werten nachweislich nicht.
+- doPost validiert jetzt vor jeder Aktion die Sheet-Kopfzeile gegen SPALTEN_NOTIZEN (notizenHeaderPruefen_ in SheetSetup.js).
+- Diverse kleinere Fixes: Übernehmen-Button nur bei echtem Vorschlag, Offline-Toast wird nicht mehr vom Netz-Refresh überschrieben, Race bei parallelen Listenaufrufen, Verschieben setzt Status zurück, Bearbeiten gleicht Person/Projekt ab, max_tokens 2000 auf 4000.
+- Auf Nutzerwunsch entfernt: das 8-Sekunden-Stille-Sicherheitsnetz beim Erfassen (weder Sprache noch Tippen speichern mehr automatisch, nur noch "Fertig").
+- Datei claude.md zu CLAUDE.md umbenannt (Großschreibung, case-sensitive Dateisysteme).
+- Bekannt/hingenommen (geringer Nutzen für den Aufwand): keine Längenprüfung bei Bearbeiten-Feldern/Suchwert, Person/Projekt-Filter-Cache in der PWA wird nie aufgeräumt, Test.js bleibt im Produktivprojekt ausgerollt.
 
 ### Session 5: Outlook-Anbindung
 
